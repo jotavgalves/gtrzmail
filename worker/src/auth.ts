@@ -4,6 +4,7 @@ import { json, readJson } from './http';
 
 const encoder = new TextEncoder();
 const COOKIE_NAME = 'gtrz_session';
+const MAX_PBKDF2_ITERATIONS = 100000;
 
 type UserRow = {
   id: string;
@@ -25,6 +26,17 @@ function cookieValue(request: Request, name: string): string | null {
 }
 
 async function verifyPassword(password: string, user: UserRow): Promise<boolean> {
+  if (!Number.isInteger(user.password_iterations) || user.password_iterations < 1 || user.password_iterations > MAX_PBKDF2_ITERATIONS) {
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'auth.password_hash_unsupported',
+      userId: user.id,
+      iterations: user.password_iterations,
+      maxSupportedIterations: MAX_PBKDF2_ITERATIONS
+    }));
+    return false;
+  }
+
   const material = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
   const derived = new Uint8Array(
     await crypto.subtle.deriveBits(
