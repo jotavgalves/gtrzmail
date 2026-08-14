@@ -14,7 +14,7 @@ if (!email.includes('@') || password.length < 12) {
   process.exit(1);
 }
 
-const iterations = 210000;
+const iterations = 100000;
 const salt = crypto.randomBytes(32);
 const hash = crypto.pbkdf2Sync(password, salt, iterations, 32, 'sha256');
 const userId = crypto.randomUUID();
