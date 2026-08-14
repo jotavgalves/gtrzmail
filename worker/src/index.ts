@@ -13,7 +13,7 @@ import {
 
 async function api(request: Request, env: AppEnv): Promise<Response> {
   const url = new URL(request.url);
-  const path = url.pathname;
+  const path = url.pathname.length > 1 ? url.pathname.replace(/\/+$/, '') : url.pathname;
 
   if (path === '/api/health' && request.method === 'GET') {
     return json({ ok: true, service: env.APP_NAME, time: new Date().toISOString() });
