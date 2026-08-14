@@ -2,18 +2,21 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 
 const secret = crypto.randomBytes(32).toString('base64');
-const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+const isWindows = process.platform === 'win32';
+const command = isWindows ? 'npx.cmd' : 'npx';
 
 console.log('Gerando e enviando uma nova MASTER_KEY_B64 de 256 bits para o Worker...');
 console.log('O valor não será exibido no terminal.');
 
 const result = spawnSync(
-  npx,
+  command,
   ['wrangler', 'secret', 'put', 'MASTER_KEY_B64'],
   {
     input: `${secret}\n`,
     stdio: ['pipe', 'inherit', 'inherit'],
-    encoding: 'utf8'
+    encoding: 'utf8',
+    shell: isWindows,
+    windowsHide: true
   }
 );
 
