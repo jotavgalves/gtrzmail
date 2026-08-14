@@ -1,0 +1,35 @@
+{
+  "name": "gtrz-mail",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:web": "vite --config apps/web/vite.config.ts",
+    "build": "vite build --config apps/web/vite.config.ts",
+    "cf:typegen": "wrangler types worker-configuration.d.ts",
+    "typecheck": "npm run cf:typegen && tsc -p tsconfig.json --noEmit",
+    "dev": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "deploy:dry": "npm run build && wrangler deploy --dry-run",
+    "db:migrate:local": "wrangler d1 migrations apply gtrz-mail --local",
+    "db:migrate:remote": "wrangler d1 migrations apply gtrz-mail --remote",
+    "admin:create": "node scripts/create-admin.mjs"
+  },
+  "dependencies": {
+    "lucide-react": "1.28.0",
+    "postal-mime": "2.7.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@vitejs/plugin-react": "6.0.4",
+    "typescript": "7.0.2",
+    "vite": "8.1.5",
+    "wrangler": "4.114.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
