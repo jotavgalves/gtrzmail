@@ -19,8 +19,17 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
     return json({ ok: true, service: env.APP_NAME, time: new Date().toISOString() });
   }
 
-  if (path === '/api/webhooks/resend' && request.method === 'POST') {
-    return handleResendWebhook(request, env);
+  if (path === '/api/webhooks/resend') {
+    if (request.method === 'POST') return handleResendWebhook(request, env);
+    if (request.method === 'GET') {
+      return json({
+        ok: true,
+        endpoint: 'resend-webhook',
+        accepts: ['POST'],
+        message: 'Endpoint ativo. O Resend envia eventos para esta URL via POST assinado.'
+      });
+    }
+    return json({ error: 'Método não permitido.' }, 405, { allow: 'GET, POST' });
   }
 
   const requestOrigin = new URL(request.url).origin;
