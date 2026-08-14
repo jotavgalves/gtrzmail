@@ -14,7 +14,8 @@
     "db:migrate:local": "wrangler d1 migrations apply gtrz-mail --local",
     "db:migrate:remote": "wrangler d1 migrations apply gtrz-mail --remote",
     "admin:create": "node scripts/create-admin.mjs",
-    "secret:master-key": "node scripts/generate-master-key.mjs"
+    "secret:master-key": "node scripts/generate-master-key.mjs",
+    "secret:rotate-master-key": "node scripts/rotate-master-key.mjs"
   },
   "dependencies": {
     "lucide-react": "1.28.0",
