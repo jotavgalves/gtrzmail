@@ -25,6 +25,9 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Validate D1 migration
+        run: sqlite3 ':memory:' < database/migrations/0001_initial.sql
+
       - name: Build PWA
         run: npm run build
 

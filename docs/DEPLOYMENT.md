@@ -7,6 +7,8 @@
 - conta Cloudflare com Workers, D1, R2 e Email Routing;
 - conta Resend para a saída de e-mails.
 
+O repositório fixa Node 22 em `.nvmrc`.
+
 ## 2. Instalar dependências
 
 ```bash
@@ -42,19 +44,21 @@ O bucket deve permanecer privado. Não configure domínio público para ele.
 
 ## 5. Configurar os segredos
 
-Gere uma chave mestra de 32 bytes:
+Gere uma chave mestra aleatória de 256 bits localmente:
 
 ```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+npm run secret:master-key
 ```
 
-Depois:
+Copie apenas o valor gerado e configure os segredos no Worker:
 
 ```bash
 npx wrangler secret put MASTER_KEY_B64
 npx wrangler secret put RESEND_API_KEY
 npx wrangler secret put RESEND_WEBHOOK_SECRET
 ```
+
+Nunca grave esses valores em `.env`, `wrangler.jsonc`, commits, issues ou logs públicos. Para desenvolvimento local, use `.dev.vars`, que já está ignorado pelo Git.
 
 ## 6. Criar o primeiro usuário
 
@@ -92,6 +96,8 @@ npm run cf:typegen
 npm run typecheck
 npm run deploy:dry
 ```
+
+O mesmo fluxo é executado no GitHub Actions. A migration inicial do D1 também é validada em SQLite no CI.
 
 ## 10. Deploy
 
