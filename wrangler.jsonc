@@ -18,8 +18,9 @@
     {
       "binding": "DB",
       "database_name": "gtrz-mail",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
-      "migrations_dir": "database/migrations"
+      "database_id": "22c3daff-7adf-4289-a379-0a9c93e7593e",
+      "migrations_dir": "database/migrations",
+      "remote": true
     }
   ],
   "r2_buckets": [
