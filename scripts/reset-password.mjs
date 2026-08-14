@@ -1,5 +1,8 @@
 import crypto from 'node:crypto';
 import readline from 'node:readline/promises';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { stdin as input, stdout as output } from 'node:process';
 
 const PBKDF2_ITERATIONS = 100000;
@@ -19,6 +22,27 @@ const esc = (value) => value.replaceAll("'", "''");
 const safeEmail = esc(email);
 const sql = `UPDATE users SET password_salt='${salt.toString('base64')}', password_hash='${hash.toString('base64')}', password_iterations=${PBKDF2_ITERATIONS} WHERE email='${safeEmail}'; DELETE FROM sessions WHERE user_id=(SELECT id FROM users WHERE email='${safeEmail}');`;
 
-console.log('\nExecute este comando no PowerShell para atualizar a senha no D1 remoto:\n');
-console.log(`npx wrangler d1 execute gtrz-mail --remote --command "${sql}"`);
-console.log('\nA senha não aparece no comando; somente salt e hash derivados são gravados no D1.');
+const here = path.dirname(fileURLToPath(import.meta.url));
+const wranglerBin = path.resolve(here, '..', 'node_modules', 'wrangler', 'bin', 'wrangler.js');
+
+console.log('\nAtualizando a senha diretamente no D1 remoto...');
+console.log('Salt, hash e senha não serão exibidos.');
+
+const result = spawnSync(
+  process.execPath,
+  [wranglerBin, 'd1', 'execute', 'gtrz-mail', '--remote', '--command', sql],
+  { stdio: 'inherit' }
+);
+
+if (result.error) {
+  console.error('Não foi possível executar o Wrangler:', result.error.message);
+  process.exit(1);
+}
+
+if (result.status !== 0) {
+  console.error(`O Wrangler terminou com código ${result.status ?? 'desconhecido'}.`);
+  process.exit(result.status ?? 1);
+}
+
+console.log(`Senha de ${email} atualizada com PBKDF2 (${PBKDF2_ITERATIONS} iterações).`);
+console.log('Sessões anteriores dessa conta foram invalidadas.');
