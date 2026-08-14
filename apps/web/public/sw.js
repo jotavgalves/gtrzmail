@@ -1,5 +1,5 @@
-const CACHE = 'gtrz-mail-shell-v1';
-const SHELL = ['/', '/manifest.webmanifest', '/brand/gtrz-symbol.svg', '/brand/gtrz-lockup.svg'];
+const CACHE = 'gtrz-mail-shell-v2';
+const SHELL = ['/', '/manifest.webmanifest', '/favicon.svg', '/brand/gtrz-symbol.svg', '/brand/gtrz-lockup.svg'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));

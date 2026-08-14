@@ -1,0 +1,35 @@
+name: GTRZ Mail CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/build-gtrz-mail
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build PWA
+        run: npm run build
+
+      - name: Typecheck Worker and web app
+        run: npm run typecheck
+
+      - name: Validate Worker bundle
+        run: npm run deploy:dry
