@@ -17,20 +17,22 @@ import {
 } from './admin';
 import { listRecentContacts } from './contacts';
 import { assertSameOrigin, json, readJson, withSecurityHeaders } from './http';
-import {
-  handleResendWebhook,
-  listMessages,
-  messageStats,
-  receiveEmail
-} from './mail';
+import { messageStats, receiveEmail } from './mail';
 import {
   downloadAttachmentRich,
-  getMessageRich,
   saveDraftRich,
   sendMessageRich
 } from './mail-rich';
 import { updateMessageActionRich } from './message-actions-rich';
 import { getSignature, updateSignature } from './profile';
+import { pushPublicKey, subscribePush, unsubscribePush } from './push';
+import {
+  getThreadedMessage,
+  handleThreadedResendWebhook,
+  listThreadedMessages,
+  notifyLatestInbound
+} from './thread-mail';
+import { threadMessageIds } from './threads';
 
 async function api(request: Request, env: AppEnv): Promise<Response> {
   const url = new URL(request.url);
@@ -41,7 +43,7 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   }
 
   if (path === '/api/webhooks/resend') {
-    if (request.method === 'POST') return handleResendWebhook(request, env);
+    if (request.method === 'POST') return handleThreadedResendWebhook(request, env);
     if (request.method === 'GET') {
       return json({
         ok: true,
@@ -72,6 +74,10 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   if (path === '/api/account/signature' && request.method === 'GET') return getSignature(env, user);
   if (path === '/api/account/signature' && request.method === 'POST') return updateSignature(request, env, user);
 
+  if (path === '/api/push/public-key' && request.method === 'GET') return pushPublicKey(env);
+  if (path === '/api/push/subscribe' && request.method === 'POST') return subscribePush(request, env, user);
+  if (path === '/api/push/unsubscribe' && request.method === 'POST') return unsubscribePush(request, env, user);
+
   if (path === '/api/admin/accounts' && request.method === 'GET') return listAccounts(env, user);
   if (path === '/api/admin/accounts' && request.method === 'POST') return createAccount(request, env, user);
   if (path === '/api/admin/mailboxes' && request.method === 'POST') return addMailbox(request, env, user);
@@ -82,13 +88,16 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   if (adminPasswordMatch && request.method === 'POST') return resetAccountPassword(request, env, user, adminPasswordMatch[1]);
 
   if (path === '/api/contacts' && request.method === 'GET') return listRecentContacts(env, user);
-  if (path === '/api/messages' && request.method === 'GET') return listMessages(request, env, user);
+  if (path === '/api/messages' && request.method === 'GET') return listThreadedMessages(request, env, user);
   if (path === '/api/messages/stats' && request.method === 'GET') return messageStats(env, user);
   if (path === '/api/messages/send' && request.method === 'POST') return sendMessageRich(request, env, user);
   if (path === '/api/messages/draft' && request.method === 'POST') return saveDraftRich(request, env, user);
 
+  const threadMatch = path.match(/^\/api\/threads\/([0-9a-f-]+)$/i);
+  if (threadMatch && request.method === 'GET') return threadMessageIds(env, user, threadMatch[1]);
+
   const messageMatch = path.match(/^\/api\/messages\/([0-9a-f-]+)$/i);
-  if (messageMatch && request.method === 'GET') return getMessageRich(env, user, messageMatch[1]);
+  if (messageMatch && request.method === 'GET') return getThreadedMessage(env, user, messageMatch[1]);
 
   const actionMatch = path.match(/^\/api\/messages\/([0-9a-f-]+)\/(read|star|trash|archive|restore|delete)$/i);
   if (actionMatch && request.method === 'POST') {
@@ -134,9 +143,18 @@ export default {
     }
   },
 
-  async email(message, env): Promise<void> {
+  async email(message, env, ctx): Promise<void> {
     try {
       await receiveEmail(message, env);
+      ctx.waitUntil(
+        notifyLatestInbound(env, message.to, message.from).catch((error) => {
+          console.error(JSON.stringify({
+            level: 'warn',
+            event: 'push.inbound_failed',
+            message: error instanceof Error ? error.message : 'Unknown error'
+          }));
+        })
+      );
     } catch (error) {
       console.error(JSON.stringify({
         level: 'error',
