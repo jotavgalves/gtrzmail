@@ -1,4 +1,4 @@
-const CACHE = 'gtrz-mail-shell-v10';
+const CACHE = 'gtrz-mail-shell-v11';
 const SHELL = ['/', '/manifest.webmanifest', '/favicon.svg', '/brand/gtrz-symbol.svg', '/brand/gtrz-lockup.svg'];
 
 function isCacheableRequest(request, url) {
@@ -116,9 +116,7 @@ self.addEventListener('push', (event) => {
       tag: threadId ? `gtrz-thread-${threadId}` : 'gtrz-mail',
       renotify: true,
       data: { url, messageId, threadId },
-      actions: [
-        { action: 'open', title: 'Abrir e-mail' }
-      ]
+      actions: [{ action: 'open', title: 'Abrir e-mail' }]
     });
   })());
 });
