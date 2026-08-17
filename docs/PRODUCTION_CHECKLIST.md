@@ -22,6 +22,17 @@ npm run deploy
 
 Se uma versão futura adicionar alteração de schema, aplique a migration D1 primeiro e só então publique o Worker que depende dela.
 
+## Cache do PWA
+
+O frontend usa cache-first para tornar a navegação e os assets instantâneos sem congelar atualizações do produto.
+
+- navegações e recursos estáveis usam stale-while-revalidate: o cache responde imediatamente e a versão da rede atualiza o cache em segundo plano;
+- assets gerados pelo Vite em `/assets/` usam cache-first, pois o hash do nome muda quando o conteúdo muda;
+- o arquivo `/sw.js` nunca é servido pelo próprio cache e o registro usa `updateViaCache: none`, garantindo verificação de uma nova versão do service worker;
+- `/api/*` nunca é interceptado pelo service worker;
+- mensagens, sessões, contagens, estados de entrega e anexos continuam sempre dinâmicos e não usam o cache do app shell;
+- uma nova versão do frontend substitui o conteúdo em cache sem exigir limpeza manual do navegador.
+
 ## Alternância de contas
 
 A alternância usa sessões independentes com cookies HttpOnly separados por conta.
@@ -78,6 +89,8 @@ Depois de observar autenticação e reputação, migre gradualmente para `quaran
 12. Criar uma conta de teste pelo painel administrativo e fazer login nela.
 13. Criar uma caixa adicional e confirmar envio. Para recebimento, a Cloudflare precisa ter uma regra compatível ou catch-all apontando para o Worker.
 14. Ativar notificações e verificar badge de não lidas no PWA compatível.
+15. Reabrir o PWA com rede normal e confirmar carregamento imediato pelo cache.
+16. Publicar uma alteração visual de teste, recarregar duas vezes e confirmar que a nova versão substitui a anterior sem limpar cache manualmente.
 
 ## Observações de segurança
 
