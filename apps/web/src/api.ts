@@ -14,6 +14,8 @@ export type Mailbox = {
 
 export type MessageSummary = {
   id: string;
+  threadId: string;
+  threadCount: number;
   direction: string;
   folder: string;
   fromName: string | null;
@@ -84,6 +86,15 @@ export type AdminAccount = {
   mailboxes: AdminMailbox[];
 };
 
+export type BrowserPushSubscription = {
+  endpoint: string;
+  expirationTime?: number | null;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+};
+
 export class ApiError extends Error {
   status: number;
   constructor(message: string, status: number) {
@@ -147,6 +158,15 @@ export const mailApi = {
     method: 'POST',
     body: JSON.stringify({ html })
   }),
+  pushPublicKey: () => apiFetch<{ configured: boolean; publicKey: string | null }>('/api/push/public-key'),
+  pushSubscribe: (subscription: BrowserPushSubscription) => apiFetch<{ ok: boolean }>('/api/push/subscribe', {
+    method: 'POST',
+    body: JSON.stringify(subscription)
+  }),
+  pushUnsubscribe: (endpoint: string) => apiFetch<{ ok: boolean }>('/api/push/unsubscribe', {
+    method: 'POST',
+    body: JSON.stringify({ endpoint })
+  }),
   contacts: () => apiFetch<{ contacts: RecentContact[] }>('/api/contacts'),
   list: (folder: string, query = '', filters: MessageFilters = {}) => {
     const params = new URLSearchParams({ folder, q: query });
@@ -157,6 +177,7 @@ export const mailApi = {
   },
   stats: () => apiFetch<{ folders: FolderStats }>('/api/messages/stats'),
   get: (id: string) => apiFetch<{ message: MessageDetail }>(`/api/messages/${id}`),
+  thread: (threadId: string) => apiFetch<{ threadId: string; messages: Array<{ id: string; folder: string; receivedAt: number }> }>(`/api/threads/${threadId}`),
   action: (id: string, action: 'read' | 'star' | 'trash' | 'archive' | 'restore' | 'delete', value?: boolean) =>
     apiFetch<{ ok: boolean }>(`/api/messages/${id}/${action}`, {
       method: 'POST',
