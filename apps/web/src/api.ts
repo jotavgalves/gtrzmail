@@ -14,8 +14,8 @@ export type Mailbox = {
 
 export type MessageSummary = {
   id: string;
-  threadId: string;
-  threadCount: number;
+  threadId?: string;
+  threadCount?: number;
   direction: string;
   folder: string;
   fromName: string | null;
