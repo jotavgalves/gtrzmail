@@ -21,8 +21,7 @@ import {
   handleResendWebhook,
   listMessages,
   messageStats,
-  receiveEmail,
-  updateMessageAction
+  receiveEmail
 } from './mail';
 import {
   downloadAttachmentRich,
@@ -30,6 +29,7 @@ import {
   saveDraftRich,
   sendMessageRich
 } from './mail-rich';
+import { updateMessageActionRich } from './message-actions-rich';
 import { getSignature, updateSignature } from './profile';
 
 async function api(request: Request, env: AppEnv): Promise<Response> {
@@ -101,7 +101,7 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
         value = true;
       }
     }
-    return updateMessageAction(
+    return updateMessageActionRich(
       env,
       user,
       actionMatch[1],
