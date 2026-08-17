@@ -39,7 +39,7 @@ import {
 } from './key-rotation';
 import { loginHardened } from './login-security';
 import { messageStats } from './mail';
-import { saveDraftRich, sendMessageRich } from './mail-rich';
+import { saveDraftRich } from './mail-rich';
 import { updateMessageActionRich } from './message-actions-rich';
 import {
   deletePasskey,
@@ -58,6 +58,7 @@ import { getSignature, updateSignature } from './profile';
 import { pushPublicKey, subscribePush, unsubscribePush } from './push';
 import { receiveEmailFast } from './receive-fast';
 import { listAdminSecurityEvents, listSecurityEvents } from './security-events';
+import { sendMessageGuarded } from './send-security';
 import {
   getThreadedMessage,
   handleThreadedResendWebhook,
@@ -164,7 +165,7 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
 
   if (path === '/api/messages' && request.method === 'GET') return listThreadedMessages(request, env, user);
   if (path === '/api/messages/stats' && request.method === 'GET') return messageStats(env, user);
-  if (path === '/api/messages/send' && request.method === 'POST') return sendMessageRich(request, env, user);
+  if (path === '/api/messages/send' && request.method === 'POST') return sendMessageGuarded(request, env, user);
   if (path === '/api/messages/draft' && request.method === 'POST') return saveDraftRich(request, env, user);
 
   const threadMatch = path.match(/^\/api\/threads\/([0-9a-f-]+)$/i);
