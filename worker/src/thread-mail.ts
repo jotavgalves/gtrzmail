@@ -15,8 +15,8 @@ function parseJsonArray(value: string): string[] {
 }
 
 export async function listThreadedMessages(request: Request, env: AppEnv, user: SessionUser): Promise<Response> {
-  await ensureUserThreads(env, user.id);
-
+  // Never rebuild threads while the user is waiting for the inbox.
+  // Reconciliation is maintenance work performed on inbound/webhook paths.
   const url = new URL(request.url);
   const allowedFolders = new Set(['inbox', 'sent', 'drafts', 'trash', 'archive', 'spam']);
   const requestedFolder = url.searchParams.get('folder') || '';
@@ -25,13 +25,14 @@ export async function listThreadedMessages(request: Request, env: AppEnv, user: 
   const starred = url.searchParams.get('starred') === '1';
   const unread = url.searchParams.get('unread') === '1';
   const hasAttachment = url.searchParams.get('hasAttachment') === '1';
-  const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit') || '50')));
+  const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit') || '30')));
 
   let sql = `SELECT m.id, m.direction, m.folder, m.from_name, m.from_address, m.to_json, m.subject, m.preview,
                     m.is_read, m.is_starred, m.sent_status, m.received_at, COALESCE(m.thread_id, m.id) AS thread_id,
                     (SELECT COUNT(*) FROM attachments a WHERE a.message_id = m.id) AS attachment_count,
-                    (SELECT COUNT(*) FROM messages tx WHERE COALESCE(tx.thread_id, tx.id) = COALESCE(m.thread_id, m.id)
-                      AND tx.folder NOT IN ('trash', 'spam', 'drafts')) AS thread_count
+                    (SELECT COUNT(*) FROM messages tx INDEXED BY idx_messages_thread_id
+                      WHERE COALESCE(tx.thread_id, tx.id) = COALESCE(m.thread_id, m.id)
+                        AND tx.folder NOT IN ('trash', 'spam', 'drafts')) AS thread_count
              FROM messages m
              JOIN mailboxes mb ON mb.id = m.mailbox_id
              WHERE mb.user_id = ? AND m.folder = ?`;
@@ -46,8 +47,9 @@ export async function listThreadedMessages(request: Request, env: AppEnv, user: 
     binds.push(like, like, like, like, like);
   }
 
+  // We only need enough rows to collapse recent messages into the requested number of threads.
   sql += ' ORDER BY m.received_at DESC LIMIT ?';
-  binds.push(Math.min(400, limit * 6));
+  binds.push(Math.min(160, Math.max(limit, limit * 4)));
 
   const result = await env.DB.prepare(sql).bind(...binds).all<{
     id: string;
@@ -96,7 +98,7 @@ export async function listThreadedMessages(request: Request, env: AppEnv, user: 
 }
 
 export async function getThreadedMessage(env: AppEnv, user: SessionUser, messageId: string): Promise<Response> {
-  await ensureUserThreads(env, user.id);
+  // Message detail is intentionally independent from global thread maintenance.
   const response = await getMessageRich(env, user, messageId);
   if (!response.ok) return response;
   const payload = await response.json() as { message?: Record<string, unknown> };
@@ -128,6 +130,7 @@ export async function handleThreadedResendWebhook(request: Request, env: AppEnv)
         `SELECT mb.user_id FROM messages m JOIN mailboxes mb ON mb.id = m.mailbox_id
          WHERE m.provider_id = ? LIMIT 1`
       ).bind(providerId).first<{ user_id: string }>();
+      // Webhook work is off the interactive path, so maintenance can happen here.
       if (owner) await ensureUserThreads(env, owner.user_id);
     }
   } catch {
@@ -156,6 +159,8 @@ export async function notifyLatestInbound(env: AppEnv, toAddress: string, fromAd
   }>();
   if (!row) return;
 
+  // This runs under ctx.waitUntil after the message is already stored. It may reconcile
+  // threads without delaying the inbox UI or the sender's SMTP transaction.
   await ensureUserThreads(env, row.user_id);
   const current = await env.DB.prepare('SELECT COALESCE(thread_id, id) AS thread_id FROM messages WHERE id = ? LIMIT 1')
     .bind(row.id).first<{ thread_id: string }>();
