@@ -22,49 +22,60 @@ function prepareComposer(): void {
   }
 }
 
-function syncVisualViewport(): void {
+/**
+ * iOS updates VisualViewport many times while its keyboard animates and while
+ * the user scrolls a contentEditable. Moving the fixed composer on every one
+ * of those events creates a feedback loop (the visible "bounce").
+ *
+ * We never mirror offsetTop and never listen to VisualViewport.scroll. We only
+ * take a settled height snapshot after resize, so the editor can shrink for
+ * the keyboard without fighting the user's finger/caret scrolling.
+ */
+function settleViewportHeight(): void {
   const compose = document.querySelector<HTMLElement>('.m-compose');
   if (!compose) return;
 
   const viewport = window.visualViewport;
   if (!viewport) {
-    compose.style.removeProperty('height');
-    compose.style.removeProperty('top');
-    compose.style.removeProperty('bottom');
+    compose.style.removeProperty('--compose-viewport-height');
     return;
   }
 
-  compose.style.height = `${Math.round(viewport.height)}px`;
-  compose.style.minHeight = '0';
-  compose.style.top = `${Math.round(viewport.offsetTop)}px`;
-  compose.style.bottom = 'auto';
+  const height = Math.max(320, Math.round(viewport.height));
+  compose.style.setProperty('--compose-viewport-height', `${height}px`);
 }
 
 export default function MobileUXFixes() {
   useEffect(() => {
-    let frame = 0;
-    const schedule = () => {
-      window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        prepareComposer();
-        syncVisualViewport();
-      });
+    let prepareFrame = 0;
+    let resizeTimer = 0;
+
+    const prepare = () => {
+      window.cancelAnimationFrame(prepareFrame);
+      prepareFrame = window.requestAnimationFrame(prepareComposer);
     };
 
-    schedule();
-    document.addEventListener('click', schedule, true);
-    document.addEventListener('focusin', schedule, true);
-    window.addEventListener('resize', schedule);
-    window.visualViewport?.addEventListener('resize', schedule);
-    window.visualViewport?.addEventListener('scroll', schedule);
+    const settle = () => {
+      window.clearTimeout(resizeTimer);
+      // Wait until the iOS keyboard/viewport animation is essentially settled.
+      resizeTimer = window.setTimeout(settleViewportHeight, 140);
+    };
+
+    prepare();
+    settleViewportHeight();
+
+    document.addEventListener('click', prepare, true);
+    document.addEventListener('focusin', prepare, true);
+    window.addEventListener('resize', settle, { passive: true });
+    window.visualViewport?.addEventListener('resize', settle, { passive: true });
 
     return () => {
-      window.cancelAnimationFrame(frame);
-      document.removeEventListener('click', schedule, true);
-      document.removeEventListener('focusin', schedule, true);
-      window.removeEventListener('resize', schedule);
-      window.visualViewport?.removeEventListener('resize', schedule);
-      window.visualViewport?.removeEventListener('scroll', schedule);
+      window.cancelAnimationFrame(prepareFrame);
+      window.clearTimeout(resizeTimer);
+      document.removeEventListener('click', prepare, true);
+      document.removeEventListener('focusin', prepare, true);
+      window.removeEventListener('resize', settle);
+      window.visualViewport?.removeEventListener('resize', settle);
     };
   }, []);
 
