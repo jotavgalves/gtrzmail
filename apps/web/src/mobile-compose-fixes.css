@@ -1,0 +1,114 @@
+@media (max-width: 820px) {
+  /* The current account is already shown in the sheet header. Do not repeat it. */
+  .m-account-list > button.current {
+    display: none;
+  }
+
+  /* Mobile compose: everything actionable stays above the editor/keyboard. */
+  .m-compose-header { order: 0; }
+  .m-compose-fields { order: 1; }
+
+  .m-compose-bottom {
+    order: 2;
+    grid-template-columns: 44px 44px minmax(0, 1fr);
+    min-height: 50px;
+    padding: 4px 10px;
+    border-top: 0;
+    border-bottom: 1px solid #202024;
+    background: #0b0b0c;
+  }
+
+  .m-compose-bottom button,
+  .m-compose-bottom label {
+    width: 40px;
+    height: 40px;
+  }
+
+  .m-compose-bottom span {
+    font-size: 11px;
+    color: #85858c;
+  }
+
+  .m-compose-files {
+    position: static;
+    order: 3;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    z-index: auto;
+    width: auto;
+    max-height: 96px;
+    margin: 7px 10px 0;
+    flex: 0 0 auto;
+  }
+
+  .m-compose-error {
+    position: static;
+    order: 4;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    z-index: auto;
+    margin: 7px 10px 0;
+    padding: 8px 10px;
+    flex: 0 0 auto;
+  }
+
+  .m-editor-zone {
+    order: 5;
+    flex: 1 1 0;
+    min-height: 0;
+  }
+
+  .m-editor-zone .rich-toolbar {
+    border-top: 0;
+    border-bottom: 1px solid #202024;
+  }
+
+  .m-editor-zone .rich-editor-surface {
+    padding: 16px 16px 28px;
+  }
+
+  /* Cc/Bcc rows become first-class fields once expanded. */
+  .m-compose-row[data-copy-row],
+  .m-compose-row.copy-row {
+    background: #09090a;
+  }
+
+  /* Avoid iOS zoom and make recipient fields easier to edit with the keyboard open. */
+  .m-compose-row input,
+  .m-compose-row select,
+  .m-editor-zone .rich-editor-surface {
+    font-size: 16px;
+  }
+
+  .m-compose-row {
+    min-height: 44px;
+  }
+
+  .m-compose-row input,
+  .m-compose-row select {
+    height: 42px;
+  }
+
+  @media (max-height: 650px) {
+    .m-compose-header {
+      min-height: calc(52px + env(safe-area-inset-top));
+    }
+
+    .m-compose-row {
+      min-height: 40px;
+    }
+
+    .m-compose-row input,
+    .m-compose-row select {
+      height: 38px;
+    }
+
+    .m-compose-bottom {
+      min-height: 44px;
+      padding-top: 2px;
+      padding-bottom: 2px;
+    }
+  }
+}
