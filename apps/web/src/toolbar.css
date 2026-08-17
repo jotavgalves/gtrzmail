@@ -1,3 +1,11 @@
+.filter-control {
+  z-index: 90;
+}
+
+.filter-popover {
+  z-index: 290;
+}
+
 .message-more-menu {
   position: fixed;
   z-index: 280;
@@ -137,5 +145,18 @@
   .message-more-menu {
     right: 10px !important;
     top: 66px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .filter-control {
+    display: block !important;
+  }
+
+  .filter-popover {
+    position: fixed;
+    top: 66px;
+    right: 10px;
+    width: min(220px, calc(100vw - 20px));
   }
 }
