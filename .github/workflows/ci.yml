@@ -52,6 +52,10 @@ jobs:
       - name: Validate Worker bundle
         run: npm run deploy:dry
 
+      # Production is intentionally tested only on scheduled/manual runs. A PR may
+      # contain protections that are not deployed yet, so production drift must not
+      # make an otherwise valid branch impossible to merge or deploy.
       - name: Remote production security smoke
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         shell: bash
         run: bash scripts/remote-security-smoke.sh
