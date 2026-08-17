@@ -1,6 +1,7 @@
 import { StrictMode, Suspense, lazy, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import MailSandboxEnhancer from './MailSandboxEnhancer';
 import PasskeyLoginEnhancer from './PasskeyLoginEnhancer';
 import { installPerformanceTuning } from './performance';
 import './styles.css';
@@ -15,6 +16,7 @@ import './mobile-native.css';
 import './mobile-compose-fixes.css';
 import './contacts.css';
 import './contacts-visibility.css';
+import './mail-sandbox.css';
 
 const MobileApp = lazy(() => import('./MobileApp'));
 const MobileUXFixes = lazy(() => import('./MobileUXFixes'));
@@ -62,7 +64,6 @@ function DeferredEnhancers() {
     const timer = window.setTimeout(reveal, 250);
     return () => window.clearTimeout(timer);
   }, []);
-
   if (!ready) return null;
   return <Suspense fallback={null}>
     <AccountMenuOverlay />
@@ -83,6 +84,7 @@ function RootApp() {
         <ContactsIntegration />
       </Suspense>
       <PasskeyLoginEnhancer />
+      <MailSandboxEnhancer />
     </>;
   }
 
@@ -91,9 +93,8 @@ function RootApp() {
     <Suspense fallback={null}><ContactsIntegration /></Suspense>
     <DeferredEnhancers />
     <PasskeyLoginEnhancer />
+    <MailSandboxEnhancer />
   </>;
 }
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode><RootApp /></StrictMode>
-);
+createRoot(document.getElementById('root')!).render(<StrictMode><RootApp /></StrictMode>);
