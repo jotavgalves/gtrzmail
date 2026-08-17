@@ -4,6 +4,7 @@ import {
   getKeyRotationState,
   invalidateKeyRotationStateCache,
   rewrapEncryptedDataKey,
+  unwrapDataKey,
   type KeySlot
 } from './crypto';
 import { json } from './http';
@@ -134,6 +135,9 @@ export async function rewrapKeyBatch(request: Request, env: AppEnv): Promise<Res
   const statements: D1PreparedStatement[] = [];
   for (const row of rows.results) {
     const rewrapped = await rewrapEncryptedDataKey(row.encrypted_key, row.key_iv, env);
+    // AES-GCM unwrap with the target slot must succeed before D1 is allowed to
+    // forget the old wrapper. This verifies integrity and target-key usability.
+    await unwrapDataKey(rewrapped.encryptedKey, rewrapped.keyIv, env);
     statements.push(
       env.DB.prepare(
         'UPDATE messages SET encrypted_key = ?, key_iv = ? WHERE id = ? AND encrypted_key = ?'
