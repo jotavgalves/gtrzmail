@@ -20,15 +20,17 @@ health="$(curl -sS --max-time 15 -D "$tmp/health.h" -o /dev/null -w '%{http_code
 [[ "$health" == 200 ]] && ok 'Health endpoint 200' || bad "Health returned ${health:-request-failed}"
 grep -Eiq '^cache-control: *no-store' "$tmp/health.h" 2>/dev/null && ok 'Health no-store' || bad 'Health missing Cache-Control: no-store'
 
-for path in /api/session /api/messages /api/contacts /api/admin/accounts; do
+for path in /api/session /api/messages /api/contacts /api/admin/accounts /api/account/security /api/account/security-events /api/account/passkeys /api/account/sessions; do
   code="$(curl -sS --max-time 15 -D "$tmp/api.h" -o /dev/null -w '%{http_code}' "$ORIGIN$path" || true)"
   [[ "$code" == 401 ]] && ok "$path rejects unauthenticated access" || bad "$path expected 401, got ${code:-request-failed}"
   grep -Eiq '^cache-control: *no-store' "$tmp/api.h" 2>/dev/null && ok "$path no-store" || bad "$path missing no-store"
   if grep -Eiq '^access-control-allow-origin: *\*' "$tmp/api.h" 2>/dev/null; then bad "$path exposes wildcard CORS"; else ok "$path no wildcard CORS"; fi
 done
 
-code="$(curl -sS --max-time 15 -X POST -H 'Origin: https://attacker.invalid' -H 'Content-Type: application/json' -d '{}' -o /dev/null -w '%{http_code}' "$ORIGIN/api/messages/send" || true)"
-[[ "$code" == 403 ]] && ok 'Cross-origin mutation rejected' || bad "Cross-origin POST expected 403, got ${code:-request-failed}"
+for path in /api/messages/send /api/auth/login /api/auth/passkey/options /api/account/reauth/password /api/account/reauth/passkey/options; do
+  code="$(curl -sS --max-time 15 -X POST -H 'Origin: https://attacker.invalid' -H 'Content-Type: application/json' -d '{}' -o /dev/null -w '%{http_code}' "$ORIGIN$path" || true)"
+  [[ "$code" == 403 ]] && ok "$path rejects cross-origin POST" || bad "$path cross-origin expected 403, got ${code:-request-failed}"
+done
 
 code="$(curl -sS --max-time 15 -o /dev/null -w '%{http_code}' "$ORIGIN/api/internal/key-rotation/status" || true)"
 [[ "$code" == 403 || "$code" == 404 ]] && ok "Internal rotation route protected ($code)" || bad "Internal rotation endpoint unexpectedly reachable: ${code:-request-failed}"
