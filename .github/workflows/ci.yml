@@ -25,8 +25,17 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Validate D1 migration
-        run: sqlite3 ':memory:' < database/migrations/0001_initial.sql
+      - name: Validate D1 migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          db="$(mktemp)"
+          for migration in database/migrations/*.sql; do
+            echo "Applying $migration"
+            sqlite3 "$db" < "$migration"
+          done
+          sqlite3 "$db" "PRAGMA foreign_key_check;"
+          rm -f "$db"
 
       - name: Build PWA
         run: npm run build
