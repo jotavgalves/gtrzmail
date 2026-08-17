@@ -4,7 +4,25 @@
     display: none;
   }
 
-  /* Mobile compose: everything actionable stays above the editor/keyboard. */
+  /*
+   * Stable iOS composer viewport.
+   * VisualViewport may change while the keyboard animates, but the composer is
+   * never translated with offsetTop. This avoids the Safari feedback loop that
+   * made contentEditable shake/bounce while typing or dragging.
+   */
+  .m-compose {
+    top: 0 !important;
+    bottom: auto !important;
+    height: var(--compose-viewport-height, 100dvh) !important;
+    min-height: 0 !important;
+    max-height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+  }
+
+  /* Mobile compose: every important action stays above the writing surface. */
   .m-compose-header { order: 0; }
   .m-compose-fields { order: 1; }
 
@@ -16,6 +34,7 @@
     border-top: 0;
     border-bottom: 1px solid #202024;
     background: #0b0b0c;
+    flex: 0 0 auto;
   }
 
   .m-compose-bottom button,
@@ -37,9 +56,10 @@
     bottom: auto;
     z-index: auto;
     width: auto;
-    max-height: 96px;
-    margin: 7px 10px 0;
+    max-height: 82px;
+    margin: 6px 10px 0;
     flex: 0 0 auto;
+    overscroll-behavior: contain;
   }
 
   .m-compose-error {
@@ -49,33 +69,68 @@
     right: auto;
     bottom: auto;
     z-index: auto;
-    margin: 7px 10px 0;
-    padding: 8px 10px;
+    margin: 6px 10px 0;
+    padding: 7px 10px;
     flex: 0 0 auto;
   }
 
+  /* There is exactly one scroll owner while writing: this editor viewport. */
   .m-editor-zone {
     order: 5;
     flex: 1 1 0;
     min-height: 0;
+    overflow: hidden;
+    overscroll-behavior: none;
+    touch-action: pan-y;
+  }
+
+  .m-editor-zone .rich-editor {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .m-editor-zone .rich-editor-surface-wrap {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    overscroll-behavior-x: none;
+    touch-action: pan-y;
+    scroll-behavior: auto;
+    scroll-padding-top: 18px;
+    scroll-padding-bottom: 24px;
   }
 
   .m-editor-zone .rich-toolbar {
     border-top: 0;
     border-bottom: 1px solid #202024;
+    flex: 0 0 auto;
   }
 
   .m-editor-zone .rich-editor-surface {
-    padding: 16px 16px 28px;
+    box-sizing: border-box;
+    min-height: 100%;
+    padding: 16px 16px 32px;
+    overflow: visible;
+    touch-action: pan-y;
+    -webkit-user-select: text;
+    user-select: text;
+    caret-color: #fff;
   }
 
-  /* Cc/Bcc rows become first-class fields once expanded. */
+  .m-editor-zone .rich-editor-surface:focus {
+    outline: none;
+  }
+
+  /* Cc/Bcc are first-class fields, not hidden controls on mobile. */
   .m-compose-row[data-copy-row],
   .m-compose-row.copy-row {
     background: #09090a;
   }
 
-  /* Avoid iOS zoom and make recipient fields easier to edit with the keyboard open. */
+  /* Avoid iOS input zoom. */
   .m-compose-row input,
   .m-compose-row select,
   .m-editor-zone .rich-editor-surface {
@@ -91,24 +146,31 @@
     height: 42px;
   }
 
+  /* Keep fields compact once the keyboard takes vertical space. */
   @media (max-height: 650px) {
     .m-compose-header {
-      min-height: calc(52px + env(safe-area-inset-top));
+      min-height: calc(50px + env(safe-area-inset-top));
     }
 
     .m-compose-row {
-      min-height: 40px;
+      min-height: 38px;
     }
 
     .m-compose-row input,
     .m-compose-row select {
-      height: 38px;
+      height: 36px;
     }
 
     .m-compose-bottom {
-      min-height: 44px;
-      padding-top: 2px;
-      padding-bottom: 2px;
+      min-height: 42px;
+      padding-top: 1px;
+      padding-bottom: 1px;
+    }
+
+    .m-compose-bottom button,
+    .m-compose-bottom label {
+      width: 38px;
+      height: 38px;
     }
   }
 }
