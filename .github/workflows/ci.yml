@@ -5,6 +5,9 @@ on:
   push:
     branches:
       - agent/build-gtrz-mail
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
