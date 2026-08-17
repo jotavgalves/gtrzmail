@@ -16,7 +16,15 @@ import {
   setAccountStatus
 } from './admin';
 import { bootstrapApp } from './bootstrap';
-import { listRecentContacts } from './contacts';
+import {
+  createContact,
+  deleteContact,
+  listContacts,
+  listRecentContacts,
+  setContactFavorite,
+  suggestContacts,
+  updateContact
+} from './contacts';
 import { assertSameOrigin, json, readJson, withSecurityHeaders } from './http';
 import { messageStats } from './mail';
 import {
@@ -47,21 +55,14 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   if (path === '/api/webhooks/resend') {
     if (request.method === 'POST') return handleThreadedResendWebhook(request, env);
     if (request.method === 'GET') {
-      return json({
-        ok: true,
-        endpoint: 'resend-webhook',
-        accepts: ['POST'],
-        message: 'Endpoint ativo. O Resend envia eventos para esta URL via POST assinado.'
-      });
+      return json({ ok: true, endpoint: 'resend-webhook', accepts: ['POST'], message: 'Endpoint ativo. O Resend envia eventos para esta URL via POST assinado.' });
     }
     return json({ error: 'Método não permitido.' }, 405, { allow: 'GET, POST' });
   }
 
   const requestOrigin = new URL(request.url).origin;
   const localOrigin = requestOrigin.startsWith('http://localhost:') || requestOrigin.startsWith('http://127.0.0.1:');
-  if (!assertSameOrigin(request, localOrigin ? requestOrigin : env.APP_ORIGIN)) {
-    return json({ error: 'Origem não autorizada.' }, 403);
-  }
+  if (!assertSameOrigin(request, localOrigin ? requestOrigin : env.APP_ORIGIN)) return json({ error: 'Origem não autorizada.' }, 403);
 
   if (path === '/api/auth/login' && request.method === 'POST') return login(request, env);
   if (path === '/api/auth/logout' && request.method === 'POST') return logout(request, env);
@@ -90,7 +91,16 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   const adminPasswordMatch = path.match(/^\/api\/admin\/accounts\/([0-9a-f-]+)\/password$/i);
   if (adminPasswordMatch && request.method === 'POST') return resetAccountPassword(request, env, user, adminPasswordMatch[1]);
 
-  if (path === '/api/contacts' && request.method === 'GET') return listRecentContacts(env, user);
+  if (path === '/api/contacts/recent' && request.method === 'GET') return listRecentContacts(env, user);
+  if (path === '/api/contacts/suggest' && request.method === 'GET') return suggestContacts(request, env, user);
+  if (path === '/api/contacts' && request.method === 'GET') return listContacts(env, user);
+  if (path === '/api/contacts' && request.method === 'POST') return createContact(request, env, user);
+  const contactFavoriteMatch = path.match(/^\/api\/contacts\/([0-9a-f-]+)\/favorite$/i);
+  if (contactFavoriteMatch && request.method === 'POST') return setContactFavorite(request, env, user, contactFavoriteMatch[1]);
+  const contactMatch = path.match(/^\/api\/contacts\/([0-9a-f-]+)$/i);
+  if (contactMatch && request.method === 'PUT') return updateContact(request, env, user, contactMatch[1]);
+  if (contactMatch && request.method === 'DELETE') return deleteContact(env, user, contactMatch[1]);
+
   if (path === '/api/messages' && request.method === 'GET') return listThreadedMessages(request, env, user);
   if (path === '/api/messages/stats' && request.method === 'GET') return messageStats(env, user);
   if (path === '/api/messages/send' && request.method === 'POST') return sendMessageRich(request, env, user);
@@ -98,33 +108,18 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
 
   const threadMatch = path.match(/^\/api\/threads\/([0-9a-f-]+)$/i);
   if (threadMatch && request.method === 'GET') return threadMessageIds(env, user, threadMatch[1]);
-
   const messageMatch = path.match(/^\/api\/messages\/([0-9a-f-]+)$/i);
   if (messageMatch && request.method === 'GET') return getThreadedMessage(env, user, messageMatch[1]);
-
   const actionMatch = path.match(/^\/api\/messages\/([0-9a-f-]+)\/(read|star|trash|archive|restore|delete)$/i);
   if (actionMatch && request.method === 'POST') {
     let value: boolean | undefined;
     if (actionMatch[2] === 'read' || actionMatch[2] === 'star') {
-      try {
-        const payload = await readJson<{ value?: boolean }>(request);
-        value = payload.value;
-      } catch {
-        value = true;
-      }
+      try { value = (await readJson<{ value?: boolean }>(request)).value; } catch { value = true; }
     }
-    return updateMessageActionRich(
-      env,
-      user,
-      actionMatch[1],
-      actionMatch[2] as 'read' | 'star' | 'trash' | 'archive' | 'restore' | 'delete',
-      value
-    );
+    return updateMessageActionRich(env, user, actionMatch[1], actionMatch[2] as 'read' | 'star' | 'trash' | 'archive' | 'restore' | 'delete', value);
   }
-
   const attachmentMatch = path.match(/^\/api\/attachments\/([0-9a-f-]+)$/i);
   if (attachmentMatch && request.method === 'GET') return downloadAttachmentRich(request, env, user, attachmentMatch[1]);
-
   return json({ error: 'Rota não encontrada.' }, 404);
 }
 
@@ -132,41 +127,21 @@ export default {
   async fetch(request, env): Promise<Response> {
     try {
       const url = new URL(request.url);
-      const response = url.pathname.startsWith('/api/')
-        ? await api(request, env)
-        : await env.ASSETS.fetch(request);
+      const response = url.pathname.startsWith('/api/') ? await api(request, env) : await env.ASSETS.fetch(request);
       return withSecurityHeaders(response);
     } catch (error) {
-      console.error(JSON.stringify({
-        level: 'error',
-        event: 'request.failed',
-        message: error instanceof Error ? error.message : 'Unknown error'
-      }));
+      console.error(JSON.stringify({ level: 'error', event: 'request.failed', message: error instanceof Error ? error.message : 'Unknown error' }));
       return withSecurityHeaders(json({ error: 'Erro interno.' }, 500));
     }
   },
-
   async email(message, env, ctx): Promise<void> {
     try {
       await receiveEmailFast(message, env);
-      ctx.waitUntil(
-        notifyLatestInbound(env, message.to, message.from).catch((error) => {
-          console.error(JSON.stringify({
-            level: 'warn',
-            event: 'push.inbound_failed',
-            message: error instanceof Error ? error.message : 'Unknown error'
-          }));
-        })
-      );
-    } catch (error) {
-      console.error(JSON.stringify({
-        level: 'error',
-        event: 'email.receive.failed',
-        from: message.from,
-        to: message.to,
-        size: message.rawSize,
-        message: error instanceof Error ? error.message : 'Unknown error'
+      ctx.waitUntil(notifyLatestInbound(env, message.to, message.from).catch((error) => {
+        console.error(JSON.stringify({ level: 'warn', event: 'push.inbound_failed', message: error instanceof Error ? error.message : 'Unknown error' }));
       }));
+    } catch (error) {
+      console.error(JSON.stringify({ level: 'error', event: 'email.receive.failed', from: message.from, to: message.to, size: message.rawSize, message: error instanceof Error ? error.message : 'Unknown error' }));
       message.setReject('GTRZ Mail temporary processing error');
     }
   }
