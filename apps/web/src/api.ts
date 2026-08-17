@@ -177,7 +177,7 @@ export const mailApi = {
   },
   stats: () => apiFetch<{ folders: FolderStats }>('/api/messages/stats'),
   get: (id: string) => apiFetch<{ message: MessageDetail }>(`/api/messages/${id}`),
-  thread: (threadId: string) => apiFetch<{ threadId: string; messages: Array<{ id: string; folder: string; receivedAt: number }> }>(`/api/threads/${threadId}`),
+  thread: (threadId: string) => apiFetch<{ threadId: string; messages: MessageSummary[] }>(`/api/threads/${threadId}`),
   action: (id: string, action: 'read' | 'star' | 'trash' | 'archive' | 'restore' | 'delete', value?: boolean) =>
     apiFetch<{ ok: boolean }>(`/api/messages/${id}/${action}`, {
       method: 'POST',
