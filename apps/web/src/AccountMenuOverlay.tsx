@@ -18,6 +18,16 @@ function settingsButton(): HTMLButtonElement | null {
   return buttons.find((button) => button.textContent?.toLowerCase().includes('configurações')) || null;
 }
 
+function makeChipInteractive(open: boolean) {
+  for (const chip of document.querySelectorAll<HTMLElement>('.user-chip')) {
+    chip.setAttribute('role', 'button');
+    chip.setAttribute('tabindex', '0');
+    chip.setAttribute('aria-haspopup', 'menu');
+    chip.setAttribute('aria-label', 'Abrir menu da conta');
+    chip.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+}
+
 export default function AccountMenuOverlay() {
   const [open, setOpen] = useState(false);
   const [position, setPosition] = useState<AnchorPosition>({ top: 68, right: 18 });
@@ -45,19 +55,7 @@ export default function AccountMenuOverlay() {
   };
 
   useEffect(() => {
-    const makeChipInteractive = () => {
-      for (const chip of document.querySelectorAll<HTMLElement>('.user-chip')) {
-        chip.setAttribute('role', 'button');
-        chip.setAttribute('tabindex', '0');
-        chip.setAttribute('aria-haspopup', 'menu');
-        chip.setAttribute('aria-label', 'Abrir menu da conta');
-        chip.setAttribute('aria-expanded', open ? 'true' : 'false');
-      }
-    };
-
-    makeChipInteractive();
-    const observer = new MutationObserver(makeChipInteractive);
-    observer.observe(document.body, { childList: true, subtree: true });
+    makeChipInteractive(open);
 
     const showForChip = (chip: HTMLElement) => {
       const rect = chip.getBoundingClientRect();
@@ -78,6 +76,7 @@ export default function AccountMenuOverlay() {
       const target = event.target as HTMLElement | null;
       const chip = target?.closest<HTMLElement>('.user-chip');
       if (chip) {
+        makeChipInteractive(open);
         event.preventDefault();
         event.stopPropagation();
         showForChip(chip);
@@ -96,6 +95,8 @@ export default function AccountMenuOverlay() {
       if (event.key === 'Escape') setOpen(false);
     };
 
+    const decorate = () => requestAnimationFrame(() => makeChipInteractive(open));
+
     const reposition = () => {
       if (!open) return;
       const chip = document.querySelector<HTMLElement>('.user-chip');
@@ -106,12 +107,13 @@ export default function AccountMenuOverlay() {
 
     document.addEventListener('click', click, true);
     document.addEventListener('keydown', keydown, true);
+    window.addEventListener('gtrz-message-opened', decorate);
     window.addEventListener('resize', reposition);
     window.addEventListener('scroll', reposition, true);
     return () => {
-      observer.disconnect();
       document.removeEventListener('click', click, true);
       document.removeEventListener('keydown', keydown, true);
+      window.removeEventListener('gtrz-message-opened', decorate);
       window.removeEventListener('resize', reposition);
       window.removeEventListener('scroll', reposition, true);
     };
