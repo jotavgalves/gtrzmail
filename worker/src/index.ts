@@ -39,11 +39,21 @@ import {
   rewrapKeyBatch
 } from './key-rotation';
 import { messageStats } from './mail';
-import {
-  saveDraftRich,
-  sendMessageRich
-} from './mail-rich';
+import { saveDraftRich, sendMessageRich } from './mail-rich';
 import { updateMessageActionRich } from './message-actions-rich';
+import {
+  deletePasskey,
+  listPasskeys,
+  loginOptions,
+  passwordStepUp,
+  registrationOptions,
+  requireRecentStepUp,
+  securityStatus,
+  stepUpOptions,
+  verifyLogin,
+  verifyRegistration,
+  verifyStepUp
+} from './passkeys';
 import { getSignature, updateSignature } from './profile';
 import { pushPublicKey, subscribePush, unsubscribePush } from './push';
 import { receiveEmailFast } from './receive-fast';
@@ -65,15 +75,10 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
 
   if (path === '/api/webhooks/resend') {
     if (request.method === 'POST') return handleThreadedResendWebhook(request, env);
-    if (request.method === 'GET') {
-      return json({ ok: true, endpoint: 'resend-webhook', accepts: ['POST'], message: 'Endpoint ativo. O Resend envia eventos para esta URL via POST assinado.' });
-    }
+    if (request.method === 'GET') return json({ ok: true, endpoint: 'resend-webhook', accepts: ['POST'] });
     return json({ error: 'Método não permitido.' }, 405, { allow: 'GET, POST' });
   }
 
-  // Rotation endpoints are intentionally outside same-origin/session auth because
-  // the local rotation utility talks to the deployed Worker directly. They are
-  // protected by a short-lived 256-bit bearer token stored only as a Worker secret.
   if (path === '/api/internal/key-rotation/status' && request.method === 'GET') return keyRotationStatus(request, env);
   if (path === '/api/internal/key-rotation/prepare' && request.method === 'POST') return prepareKeyRotation(request, env);
   if (path === '/api/internal/key-rotation/batch' && request.method === 'POST') return rewrapKeyBatch(request, env);
@@ -84,6 +89,8 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   if (!assertSameOrigin(request, localOrigin ? requestOrigin : env.APP_ORIGIN)) return json({ error: 'Origem não autorizada.' }, 403);
 
   if (path === '/api/auth/login' && request.method === 'POST') return login(request, env);
+  if (path === '/api/auth/passkey/options' && request.method === 'POST') return loginOptions(request, env);
+  if (path === '/api/auth/passkey/verify' && request.method === 'POST') return verifyLogin(request, env);
   if (path === '/api/auth/logout' && request.method === 'POST') return logout(request, env);
   if (path === '/api/session' && request.method === 'GET') return sessionResponse(request, env);
 
@@ -93,6 +100,17 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   if (path === '/api/bootstrap' && request.method === 'GET') return bootstrapApp(request, env, user);
   if (path === '/api/auth/accounts' && request.method === 'GET') return listSessionAccounts(request, env, user);
   if (path === '/api/auth/switch-account' && request.method === 'POST') return switchAccount(request, env, user);
+
+  if (path === '/api/account/security' && request.method === 'GET') return securityStatus(request, env, user);
+  if (path === '/api/account/reauth/password' && request.method === 'POST') return passwordStepUp(request, env, user);
+  if (path === '/api/account/reauth/passkey/options' && request.method === 'POST') return stepUpOptions(env, user);
+  if (path === '/api/account/reauth/passkey/verify' && request.method === 'POST') return verifyStepUp(request, env, user);
+  if (path === '/api/account/passkeys' && request.method === 'GET') return listPasskeys(env, user);
+  if (path === '/api/account/passkeys/register/options' && request.method === 'POST') return registrationOptions(request, env, user);
+  if (path === '/api/account/passkeys/register/verify' && request.method === 'POST') return verifyRegistration(request, env, user);
+  const passkeyMatch = path.match(/^\/api\/account\/passkeys\/(.+)$/);
+  if (passkeyMatch && request.method === 'DELETE') return deletePasskey(request, env, user, decodeURIComponent(passkeyMatch[1]));
+
   if (path === '/api/account/password' && request.method === 'POST') return changePasswordHardened(request, env, user);
   if (path === '/api/account/sessions' && request.method === 'GET') return listUserSessions(request, env, user);
   if (path === '/api/account/sessions/revoke-others' && request.method === 'POST') return revokeOtherSessions(request, env, user);
@@ -106,13 +124,25 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   if (path === '/api/push/unsubscribe' && request.method === 'POST') return unsubscribePush(request, env, user);
 
   if (path === '/api/admin/accounts' && request.method === 'GET') return listAccounts(env, user);
-  if (path === '/api/admin/accounts' && request.method === 'POST') return createAccount(request, env, user);
-  if (path === '/api/admin/mailboxes' && request.method === 'POST') return addMailbox(request, env, user);
+  if (path === '/api/admin/accounts' && request.method === 'POST') {
+    const denied = await requireRecentStepUp(request, env, user);
+    return denied || createAccount(request, env, user);
+  }
+  if (path === '/api/admin/mailboxes' && request.method === 'POST') {
+    const denied = await requireRecentStepUp(request, env, user);
+    return denied || addMailbox(request, env, user);
+  }
 
   const adminStatusMatch = path.match(/^\/api\/admin\/accounts\/([0-9a-f-]+)\/status$/i);
-  if (adminStatusMatch && request.method === 'POST') return setAccountStatus(request, env, user, adminStatusMatch[1]);
+  if (adminStatusMatch && request.method === 'POST') {
+    const denied = await requireRecentStepUp(request, env, user);
+    return denied || setAccountStatus(request, env, user, adminStatusMatch[1]);
+  }
   const adminPasswordMatch = path.match(/^\/api\/admin\/accounts\/([0-9a-f-]+)\/password$/i);
-  if (adminPasswordMatch && request.method === 'POST') return resetAccountPassword(request, env, user, adminPasswordMatch[1]);
+  if (adminPasswordMatch && request.method === 'POST') {
+    const denied = await requireRecentStepUp(request, env, user);
+    return denied || resetAccountPassword(request, env, user, adminPasswordMatch[1]);
+  }
 
   if (path === '/api/contacts/recent' && request.method === 'GET') return listRecentContacts(env, user);
   if (path === '/api/contacts/suggest' && request.method === 'GET') return suggestContacts(request, env, user);
