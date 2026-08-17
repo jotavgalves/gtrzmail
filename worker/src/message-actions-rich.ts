@@ -11,11 +11,12 @@ type MessageRow = {
   sent_status: string | null;
   r2_key: string;
   html_r2_key: string | null;
+  raw_r2_key: string | null;
 };
 
 async function userMessage(env: AppEnv, userId: string, messageId: string): Promise<MessageRow | null> {
   return env.DB.prepare(
-    `SELECT m.id, m.direction, m.folder, m.previous_folder, m.sent_status, m.r2_key, m.html_r2_key
+    `SELECT m.id, m.direction, m.folder, m.previous_folder, m.sent_status, m.r2_key, m.html_r2_key, m.raw_r2_key
      FROM messages m
      JOIN mailboxes mb ON mb.id = m.mailbox_id
      WHERE m.id = ? AND mb.user_id = ? LIMIT 1`
@@ -35,6 +36,7 @@ async function deleteMessageData(env: AppEnv, row: MessageRow): Promise<void> {
   await Promise.all([
     env.MAIL_BUCKET.delete(row.r2_key),
     ...(row.html_r2_key ? [env.MAIL_BUCKET.delete(row.html_r2_key)] : []),
+    ...(row.raw_r2_key ? [env.MAIL_BUCKET.delete(row.raw_r2_key)] : []),
     ...attachments.results.map((attachment) => env.MAIL_BUCKET.delete(attachment.r2_key))
   ]);
   await env.DB.prepare('DELETE FROM messages WHERE id = ?').bind(row.id).run();
