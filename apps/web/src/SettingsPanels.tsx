@@ -1,6 +1,109 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { KeyRound, LoaderCircle, MailPlus, ShieldCheck, UserPlus, Users } from 'lucide-react';
-import { mailApi, type AdminAccount } from './api';
+import { CheckCircle2, KeyRound, LoaderCircle, LogIn, MailPlus, ShieldCheck, UserPlus, Users } from 'lucide-react';
+import { mailApi, type AdminAccount, type SessionAccount } from './api';
+
+function AccountSessionsBlock({ onNotice }: { onNotice: (message: string) => void }) {
+  const [accounts, setAccounts] = useState<SessionAccount[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [switchingTo, setSwitchingTo] = useState<string | null>(null);
+  const [error, setError] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const result = await mailApi.sessionAccounts();
+      setAccounts(result.accounts);
+      setError('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível carregar as contas conectadas.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { void load(); }, []);
+
+  const switchTo = async (account: SessionAccount) => {
+    if (account.current) return;
+    setSwitchingTo(account.id);
+    setError('');
+    try {
+      await mailApi.switchAccount(account.id);
+      window.location.reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível alternar a conta.');
+      setSwitchingTo(null);
+    }
+  };
+
+  const addAccount = async (event: FormEvent) => {
+    event.preventDefault();
+    setSubmitting(true);
+    setError('');
+    try {
+      await mailApi.login(email, password);
+      onNotice('Conta adicionada com segurança.');
+      window.location.reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível adicionar a conta.');
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <section className="settings-section account-switcher-panel">
+      <h3><Users size={15} /> Alternar conta</h3>
+      <p className="settings-hint">Contas autenticadas neste navegador ficam disponíveis para troca rápida. As sessões são mantidas em cookies HttpOnly; a senha não é armazenada no navegador.</p>
+
+      {loading ? <div className="settings-loading"><LoaderCircle size={18} className="spin" /> Carregando contas</div> : (
+        <div className="admin-account-list">
+          {accounts.map((account) => (
+            <article className="admin-account" key={account.id}>
+              <div className="admin-account-head">
+                <div>
+                  <strong>{account.displayName}</strong>
+                  <span>{account.email}</span>
+                </div>
+                <div className="admin-tags">
+                  {account.current && <b className="active"><CheckCircle2 size={11} /> Atual</b>}
+                  {account.isAdmin && <b>Admin</b>}
+                </div>
+              </div>
+              {!account.current && <div className="admin-actions">
+                <button className="secondary-button" type="button" disabled={switchingTo !== null} onClick={() => void switchTo(account)}>
+                  {switchingTo === account.id ? <LoaderCircle size={14} className="spin" /> : <LogIn size={14} />}
+                  Entrar nesta conta
+                </button>
+              </div>}
+            </article>
+          ))}
+        </div>
+      )}
+
+      {!adding ? (
+        <button className="secondary-button" type="button" onClick={() => setAdding(true)}><UserPlus size={14} /> Adicionar outra conta</button>
+      ) : (
+        <form className="settings-form" onSubmit={addAccount}>
+          <input type="email" autoComplete="username" placeholder="outra-conta@gtrz.com.br" value={email} onChange={(e) => setEmail(e.target.value)} required />
+          <input type="password" autoComplete="current-password" placeholder="Senha desta conta" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <div className="admin-actions">
+            <button className="primary-button" disabled={submitting}>
+              {submitting ? <LoaderCircle size={14} className="spin" /> : <LogIn size={14} />}
+              Adicionar e entrar
+            </button>
+            <button className="secondary-button" type="button" disabled={submitting} onClick={() => { setAdding(false); setEmail(''); setPassword(''); setError(''); }}>Cancelar</button>
+          </div>
+        </form>
+      )}
+
+      {error && <div className="form-error settings-error">{error}</div>}
+    </section>
+  );
+}
 
 export function PasswordPanel({ onNotice }: { onNotice: (message: string) => void }) {
   const [currentPassword, setCurrentPassword] = useState('');
@@ -35,19 +138,22 @@ export function PasswordPanel({ onNotice }: { onNotice: (message: string) => voi
   };
 
   return (
-    <section className="settings-section">
-      <h3><KeyRound size={15} /> Alterar senha</h3>
-      <form className="settings-form" onSubmit={submit}>
-        <input type="password" autoComplete="current-password" placeholder="Senha atual" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} required />
-        <input type="password" autoComplete="new-password" placeholder="Nova senha (12+ caracteres)" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required />
-        <input type="password" autoComplete="new-password" placeholder="Confirmar nova senha" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
-        {error && <div className="form-error">{error}</div>}
-        <button className="secondary-button" disabled={loading}>
-          {loading ? <LoaderCircle size={15} className="spin" /> : <ShieldCheck size={15} />}
-          Atualizar senha
-        </button>
-      </form>
-    </section>
+    <>
+      <AccountSessionsBlock onNotice={onNotice} />
+      <section className="settings-section">
+        <h3><KeyRound size={15} /> Alterar senha</h3>
+        <form className="settings-form" onSubmit={submit}>
+          <input type="password" autoComplete="current-password" placeholder="Senha atual" value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} required />
+          <input type="password" autoComplete="new-password" placeholder="Nova senha (12+ caracteres)" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} required />
+          <input type="password" autoComplete="new-password" placeholder="Confirmar nova senha" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
+          {error && <div className="form-error">{error}</div>}
+          <button className="secondary-button" disabled={loading}>
+            {loading ? <LoaderCircle size={15} className="spin" /> : <ShieldCheck size={15} />}
+            Atualizar senha
+          </button>
+        </form>
+      </section>
+    </>
   );
 }
 
@@ -89,7 +195,7 @@ export function AdminPanel({ onNotice }: { onNotice: (message: string) => void }
       setEmail('');
       setDisplayName('');
       setPassword('');
-      onNotice('Conta criada.');
+      onNotice('Conta criada. Para alternar para ela, use “Adicionar outra conta” e autentique a nova conta uma vez.');
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao criar conta.');
@@ -115,7 +221,7 @@ export function AdminPanel({ onNotice }: { onNotice: (message: string) => void }
       await mailApi.resetAccountPassword(resetFor, resetPassword);
       setResetFor(null);
       setResetPassword('');
-      onNotice('Senha redefinida e sessões da conta encerradas.');
+      onNotice('Senha redefinida e sessões da conta encerradas. Ela precisará ser autenticada novamente no alternador.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Falha ao redefinir senha.');
     }
@@ -172,7 +278,7 @@ export function AdminPanel({ onNotice }: { onNotice: (message: string) => void }
               <div className="admin-actions">
                 {!account.isAdmin && <button className="secondary-button" type="button" onClick={() => void toggle(account)}>{account.isActive ? 'Desativar' : 'Ativar'}</button>}
                 <button className="secondary-button" type="button" onClick={() => { setResetFor(account.id); setAliasFor(null); }}>Redefinir senha</button>
-                <button className="secondary-button" type="button" onClick={() => { setAliasFor(account.id); setResetFor(null); setAliasName(account.displayName); }}> <MailPlus size={14} /> Nova caixa</button>
+                <button className="secondary-button" type="button" onClick={() => { setAliasFor(account.id); setResetFor(null); setAliasName(account.displayName); }}><MailPlus size={14} /> Nova caixa</button>
               </div>
               {resetFor === account.id && <form className="inline-admin-form" onSubmit={submitReset}>
                 <input type="password" autoComplete="new-password" placeholder="Nova senha (12+ caracteres)" value={resetPassword} onChange={(e) => setResetPassword(e.target.value)} required />
