@@ -23,6 +23,15 @@ function parseReferences(value: string): string[] {
   }
 }
 
+function parseJsonArray(value: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
 function canonicalMessageId(value: string | null | undefined): string {
   if (!value) return '';
   const trimmed = value.trim();
@@ -152,20 +161,47 @@ export function invalidateUserThreads(userId: string): void {
 export async function threadMessageIds(env: AppEnv, user: SessionUser, threadId: string): Promise<Response> {
   await ensureUserThreads(env, user.id);
   const result = await env.DB.prepare(
-    `SELECT m.id, m.folder, m.received_at
+    `SELECT m.id, m.folder, m.direction, m.from_name, m.from_address, m.to_json, m.subject, m.preview,
+            m.is_read, m.is_starred, m.sent_status, m.received_at,
+            (SELECT COUNT(*) FROM attachments a WHERE a.message_id = m.id) AS attachment_count
      FROM messages m
      JOIN mailboxes mb ON mb.id = m.mailbox_id
      WHERE mb.user_id = ? AND COALESCE(m.thread_id, m.id) = ?
      ORDER BY m.received_at ASC
      LIMIT 100`
-  ).bind(user.id, threadId).all<{ id: string; folder: string; received_at: number }>();
+  ).bind(user.id, threadId).all<{
+    id: string;
+    folder: string;
+    direction: string;
+    from_name: string | null;
+    from_address: string;
+    to_json: string;
+    subject: string;
+    preview: string;
+    is_read: number;
+    is_starred: number;
+    sent_status: string | null;
+    received_at: number;
+    attachment_count: number;
+  }>();
 
   return json({
     threadId,
     messages: result.results.map((row) => ({
       id: row.id,
+      threadId,
       folder: row.folder,
-      receivedAt: row.received_at
+      direction: row.direction,
+      fromName: row.from_name,
+      fromAddress: row.from_address,
+      to: parseJsonArray(row.to_json),
+      subject: row.subject,
+      preview: row.preview,
+      isRead: row.is_read === 1,
+      isStarred: row.is_starred === 1,
+      sentStatus: row.sent_status,
+      receivedAt: row.received_at,
+      attachmentCount: row.attachment_count
     }))
   });
 }
