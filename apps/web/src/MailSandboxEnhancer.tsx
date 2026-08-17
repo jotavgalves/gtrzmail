@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 
 const FRAME_MARKER = 'gtrz-mail-sandbox-frame';
+const MOUNT_ANIMATION = 'gtrzMailBodyMounted';
 const INLINE_ATTACHMENT_RE = /^\/api\/attachments\/[0-9a-f-]+\?inline=1$/i;
 const SAFE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
@@ -28,7 +29,6 @@ async function inlineAuthenticatedImages(body: string): Promise<string> {
       image.alt ||= 'Imagem bloqueada';
       return;
     }
-
     try {
       const response = await fetch(src, { credentials: 'same-origin', cache: 'no-store' });
       if (!response.ok) throw new Error('Inline attachment unavailable');
@@ -42,15 +42,11 @@ async function inlineAuthenticatedImages(body: string): Promise<string> {
       image.alt ||= 'Imagem bloqueada';
     }
   }));
-
   return document.body.innerHTML;
 }
 
 async function harden(container: HTMLElement) {
   if (container.dataset.gtrzMailHardening === '1' || container.dataset.gtrzMailSandboxed === '1') return;
-  const existing = container.firstElementChild as HTMLElement | null;
-  if (existing?.dataset.gtrzMailSandboxFrame === '1') return;
-
   const originalBody = container.innerHTML;
   if (!originalBody.trim()) return;
   container.dataset.gtrzMailHardening = '1';
@@ -62,8 +58,6 @@ async function harden(container: HTMLElement) {
   iframe.dataset.gtrzMailSandboxFrame = '1';
   iframe.className = FRAME_MARKER;
   iframe.title = 'Conteúdo isolado do e-mail';
-  // Deliberately omit allow-same-origin and allow-scripts. The message therefore
-  // receives an opaque origin and cannot reach cookies, storage or the parent DOM.
   iframe.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox');
   iframe.referrerPolicy = 'no-referrer';
   iframe.srcdoc = sandboxDocument(body);
@@ -73,26 +67,18 @@ async function harden(container: HTMLElement) {
   container.dataset.gtrzMailSandboxed = '1';
 }
 
-function inspect(node: Node) {
-  if (!(node instanceof Element)) return;
-  if (node.matches('.rich-mail-body')) void harden(node as HTMLElement);
-  const parent = node.parentElement?.closest('.rich-mail-body');
-  if (parent) void harden(parent as HTMLElement);
-  node.querySelectorAll<HTMLElement>('.rich-mail-body').forEach((element) => void harden(element));
-}
-
 export default function MailSandboxEnhancer() {
   useEffect(() => {
     document.querySelectorAll<HTMLElement>('.rich-mail-body').forEach((element) => void harden(element));
-    const root = document.getElementById('root');
-    if (!root) return;
-    const observer = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        for (const node of mutation.addedNodes) inspect(node);
-      }
-    });
-    observer.observe(root, { childList: true, subtree: true });
-    return () => observer.disconnect();
+
+    const mounted = (event: AnimationEvent) => {
+      if (event.animationName !== MOUNT_ANIMATION) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && target.classList.contains('rich-mail-body')) void harden(target);
+    };
+
+    document.addEventListener('animationstart', mounted);
+    return () => document.removeEventListener('animationstart', mounted);
   }, []);
   return null;
 }
