@@ -1,4 +1,4 @@
-const CACHE = 'gtrz-mail-shell-v6';
+const CACHE = 'gtrz-mail-shell-v7';
 const SHELL = ['/', '/manifest.webmanifest', '/favicon.svg', '/brand/gtrz-symbol.svg', '/brand/gtrz-lockup.svg'];
 
 function isCacheableRequest(request, url) {
