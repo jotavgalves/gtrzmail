@@ -103,17 +103,24 @@ self.addEventListener('push', (event) => {
   const threadId = payload.threadId || messageId;
   const url = payload.url || (messageId ? `/?message=${encodeURIComponent(messageId)}` : '/');
 
-  event.waitUntil(self.registration.showNotification(title, {
-    body,
-    icon: '/favicon.svg',
-    badge: '/favicon.svg',
-    tag: threadId ? `gtrz-thread-${threadId}` : 'gtrz-mail',
-    renotify: true,
-    data: { url, messageId, threadId },
-    actions: [
-      { action: 'open', title: 'Abrir e-mail' }
-    ]
-  }));
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of windows) {
+      client.postMessage({ type: 'gtrz-new-mail', messageId, threadId });
+    }
+
+    await self.registration.showNotification(title, {
+      body,
+      icon: '/favicon.svg',
+      badge: '/favicon.svg',
+      tag: threadId ? `gtrz-thread-${threadId}` : 'gtrz-mail',
+      renotify: true,
+      data: { url, messageId, threadId },
+      actions: [
+        { action: 'open', title: 'Abrir e-mail' }
+      ]
+    });
+  })());
 });
 
 self.addEventListener('notificationclick', (event) => {
