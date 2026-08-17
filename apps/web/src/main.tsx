@@ -13,6 +13,7 @@ import './toolbar.css';
 import './thread-push.css';
 import './ui-fixes.css';
 import './mobile.css';
+import './mobile-account.css';
 
 if ('serviceWorker' in navigator && !import.meta.env.DEV) {
   window.addEventListener('load', () => {
