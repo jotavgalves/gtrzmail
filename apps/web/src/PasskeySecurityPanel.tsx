@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { Fingerprint, KeyRound, LoaderCircle, ShieldCheck, Trash2 } from 'lucide-react';
 import { mailApi, type PasskeyInfo, type SecurityStatus } from './api';
 import { passkeysSupported, registerPasskey, stepUpWithPasskey } from './passkeys';
+import SecurityEventsPanel from './SecurityEventsPanel';
 
 function dateLabel(timestamp: number | null): string {
   if (!timestamp) return 'Nunca usada';
@@ -133,31 +134,34 @@ export function PasskeyPanel({ onNotice }: { onNotice: (message: string) => void
     finally { setWorking(false); }
   };
 
-  return <section className="settings-section passkey-panel">
-    <h3><Fingerprint size={16} /> Passkeys</h3>
-    <p className="settings-hint">Use Face ID, Touch ID, Windows Hello, PIN ou uma chave FIDO2. A verificação local do dispositivo é obrigatória e a chave privada nunca é enviada ao GTRZ Mail.</p>
+  return <>
+    <section className="settings-section passkey-panel">
+      <h3><Fingerprint size={16} /> Passkeys</h3>
+      <p className="settings-hint">Use Face ID, Touch ID, Windows Hello, PIN ou uma chave FIDO2. A verificação local do dispositivo é obrigatória e a chave privada nunca é enviada ao GTRZ Mail.</p>
 
-    {!status?.stepUpValid && <div className="passkey-unlock">
-      <form className="settings-form" onSubmit={unlockPassword}>
-        <input type="password" autoComplete="current-password" placeholder="Confirme sua senha para gerenciar passkeys" value={password} onChange={(e) => setPassword(e.target.value)} required />
-        <button className="secondary-button" disabled={working}>{working ? <LoaderCircle size={15} className="spin" /> : <KeyRound size={15} />} Confirmar senha</button>
-      </form>
-      {passkeys.length > 0 && passkeysSupported() && <button className="secondary-button" type="button" disabled={working} onClick={() => void unlockPasskey()}><Fingerprint size={15} /> Usar passkey</button>}
-    </div>}
+      {!status?.stepUpValid && <div className="passkey-unlock">
+        <form className="settings-form" onSubmit={unlockPassword}>
+          <input type="password" autoComplete="current-password" placeholder="Confirme sua senha para gerenciar passkeys" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <button className="secondary-button" disabled={working}>{working ? <LoaderCircle size={15} className="spin" /> : <KeyRound size={15} />} Confirmar senha</button>
+        </form>
+        {passkeys.length > 0 && passkeysSupported() && <button className="secondary-button" type="button" disabled={working} onClick={() => void unlockPasskey()}><Fingerprint size={15} /> Usar passkey</button>}
+      </div>}
 
-    {status?.stepUpValid && passkeysSupported() && <div className="settings-form settings-form-grid">
-      <input type="text" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome deste dispositivo" />
-      <button className="primary-button" type="button" disabled={working} onClick={() => void add()}>{working ? <LoaderCircle size={15} className="spin" /> : <Fingerprint size={15} />} Adicionar passkey</button>
-    </div>}
+      {status?.stepUpValid && passkeysSupported() && <div className="settings-form settings-form-grid">
+        <input type="text" maxLength={80} value={name} onChange={(e) => setName(e.target.value)} placeholder="Nome deste dispositivo" />
+        <button className="primary-button" type="button" disabled={working} onClick={() => void add()}>{working ? <LoaderCircle size={15} className="spin" /> : <Fingerprint size={15} />} Adicionar passkey</button>
+      </div>}
 
-    {!passkeysSupported() && <div className="form-error settings-error">Este navegador/dispositivo não oferece WebAuthn em contexto seguro.</div>}
+      {!passkeysSupported() && <div className="form-error settings-error">Este navegador/dispositivo não oferece WebAuthn em contexto seguro.</div>}
 
-    {passkeys.length > 0 && <div className="admin-account-list">
-      {passkeys.map((passkey) => <article className="admin-account" key={passkey.id}>
-        <div className="admin-account-head"><div><strong>{passkey.name}</strong><span>{passkey.backedUp ? 'Passkey sincronizada/backup disponível' : 'Credencial deste dispositivo'} · último uso: {dateLabel(passkey.lastUsedAt)}</span></div><div className="admin-tags"><b className="active">WebAuthn</b></div></div>
-        {status?.stepUpValid && <div className="admin-actions"><button className="secondary-button" type="button" disabled={working} onClick={() => void remove(passkey)}><Trash2 size={14} /> Remover</button></div>}
-      </article>)}
-    </div>}
-    {error && <div className="form-error settings-error">{error}</div>}
-  </section>;
+      {passkeys.length > 0 && <div className="admin-account-list">
+        {passkeys.map((passkey) => <article className="admin-account" key={passkey.id}>
+          <div className="admin-account-head"><div><strong>{passkey.name}</strong><span>{passkey.backedUp ? 'Passkey sincronizada/backup disponível' : 'Credencial deste dispositivo'} · último uso: {dateLabel(passkey.lastUsedAt)}</span></div><div className="admin-tags"><b className="active">WebAuthn</b></div></div>
+          {status?.stepUpValid && <div className="admin-actions"><button className="secondary-button" type="button" disabled={working} onClick={() => void remove(passkey)}><Trash2 size={14} /> Remover</button></div>}
+        </article>)}
+      </div>}
+      {error && <div className="form-error settings-error">{error}</div>}
+    </section>
+    <SecurityEventsPanel />
+  </>;
 }
