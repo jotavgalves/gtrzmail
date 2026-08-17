@@ -16,7 +16,7 @@ import {
 type Position = { top: number; right: number };
 type ApiErrorEvent = CustomEvent<{ message?: string }>;
 
-const TOOLTIP_LABELS = [
+const TOOLTIP_LABELS = new Set([
   'Atualizar',
   'Filtros',
   'Arquivar',
@@ -25,7 +25,7 @@ const TOOLTIP_LABELS = [
   'Excluir permanentemente',
   'Marcar como não lida',
   'Mais ações'
-];
+]);
 
 function toolbarButton(label: string): HTMLButtonElement | null {
   return document.querySelector<HTMLButtonElement>(`.reader-toolbar button[aria-label="${label}"]`);
@@ -72,17 +72,12 @@ export default function ToolbarEnhancer() {
   };
 
   useEffect(() => {
-    const decorate = () => {
-      for (const label of TOOLTIP_LABELS) {
-        document.querySelectorAll<HTMLElement>(`[aria-label="${label}"]`).forEach((element) => {
-          if (!element.getAttribute('title')) element.setAttribute('title', label);
-        });
-      }
+    const pointerOver = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      const element = target?.closest<HTMLElement>('[aria-label]');
+      const label = element?.getAttribute('aria-label') || '';
+      if (element && TOOLTIP_LABELS.has(label) && !element.title) element.title = label;
     };
-
-    decorate();
-    const observer = new MutationObserver(decorate);
-    observer.observe(document.body, { childList: true, subtree: true });
 
     const click = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
@@ -115,11 +110,12 @@ export default function ToolbarEnhancer() {
       showNotice(detail?.message || 'Não foi possível concluir a ação.');
     };
 
+    document.addEventListener('pointerover', pointerOver, true);
     document.addEventListener('click', click, true);
     document.addEventListener('keydown', keydown, true);
     window.addEventListener('gtrz-api-error', apiError as EventListener);
     return () => {
-      observer.disconnect();
+      document.removeEventListener('pointerover', pointerOver, true);
       document.removeEventListener('click', click, true);
       document.removeEventListener('keydown', keydown, true);
       window.removeEventListener('gtrz-api-error', apiError as EventListener);
