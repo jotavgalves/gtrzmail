@@ -17,6 +17,7 @@ import './mobile-compose-fixes.css';
 import './contacts.css';
 import './contacts-visibility.css';
 import './mail-sandbox.css';
+import './security.css';
 
 const MobileApp = lazy(() => import('./MobileApp'));
 const MobileUXFixes = lazy(() => import('./MobileUXFixes'));
