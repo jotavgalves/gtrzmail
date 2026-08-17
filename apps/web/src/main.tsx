@@ -12,9 +12,11 @@ import './mobile.css';
 import './mobile-account.css';
 import './mobile-native.css';
 import './mobile-compose-fixes.css';
+import './contacts.css';
 
 const MobileApp = lazy(() => import('./MobileApp'));
 const MobileUXFixes = lazy(() => import('./MobileUXFixes'));
+const ContactsIntegration = lazy(() => import('./ContactsIntegration'));
 const AccountMenuOverlay = lazy(() => import('./AccountMenuOverlay'));
 const PushEnhancer = lazy(() => import('./PushEnhancer'));
 const ThreadListEnhancer = lazy(() => import('./ThreadListEnhancer'));
@@ -84,6 +86,7 @@ function RootApp() {
       <Suspense fallback={<main className="m-boot"><img src="/brand/gtrz-symbol.svg" alt="GTRZ" /></main>}>
         <MobileApp />
         <MobileUXFixes />
+        <ContactsIntegration />
       </Suspense>
     );
   }
@@ -91,6 +94,7 @@ function RootApp() {
   return (
     <>
       <App />
+      <Suspense fallback={null}><ContactsIntegration /></Suspense>
       <DeferredEnhancers />
     </>
   );
