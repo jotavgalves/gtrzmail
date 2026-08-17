@@ -4,6 +4,7 @@ import App from './App';
 import AccountMenuOverlay from './AccountMenuOverlay';
 import './styles.css';
 import './enhancements.css';
+import './rich-email.css';
 
 if ('serviceWorker' in navigator && !import.meta.env.DEV) {
   window.addEventListener('load', () => {
