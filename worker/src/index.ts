@@ -1,12 +1,21 @@
 import type { AppEnv } from './env';
-import { getSessionUser, login, logout, sessionResponse } from './auth';
+import { changePassword, getSessionUser, login, logout, sessionResponse } from './auth';
+import {
+  addMailbox,
+  createAccount,
+  listAccounts,
+  resetAccountPassword,
+  setAccountStatus
+} from './admin';
 import { assertSameOrigin, json, readJson, withSecurityHeaders } from './http';
 import {
   downloadAttachment,
   getMessage,
   handleResendWebhook,
   listMessages,
+  messageStats,
   receiveEmail,
+  saveDraft,
   sendMessage,
   updateMessageAction
 } from './mail';
@@ -45,13 +54,26 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   const user = await getSessionUser(request, env);
   if (!user) return json({ error: 'Sessão expirada.' }, 401);
 
+  if (path === '/api/account/password' && request.method === 'POST') return changePassword(request, env, user);
+
+  if (path === '/api/admin/accounts' && request.method === 'GET') return listAccounts(env, user);
+  if (path === '/api/admin/accounts' && request.method === 'POST') return createAccount(request, env, user);
+  if (path === '/api/admin/mailboxes' && request.method === 'POST') return addMailbox(request, env, user);
+
+  const adminStatusMatch = path.match(/^\/api\/admin\/accounts\/([0-9a-f-]+)\/status$/i);
+  if (adminStatusMatch && request.method === 'POST') return setAccountStatus(request, env, user, adminStatusMatch[1]);
+  const adminPasswordMatch = path.match(/^\/api\/admin\/accounts\/([0-9a-f-]+)\/password$/i);
+  if (adminPasswordMatch && request.method === 'POST') return resetAccountPassword(request, env, user, adminPasswordMatch[1]);
+
   if (path === '/api/messages' && request.method === 'GET') return listMessages(request, env, user);
+  if (path === '/api/messages/stats' && request.method === 'GET') return messageStats(env, user);
   if (path === '/api/messages/send' && request.method === 'POST') return sendMessage(request, env, user);
+  if (path === '/api/messages/draft' && request.method === 'POST') return saveDraft(request, env, user);
 
   const messageMatch = path.match(/^\/api\/messages\/([0-9a-f-]+)$/i);
   if (messageMatch && request.method === 'GET') return getMessage(env, user, messageMatch[1]);
 
-  const actionMatch = path.match(/^\/api\/messages\/([0-9a-f-]+)\/(read|star|trash|archive)$/i);
+  const actionMatch = path.match(/^\/api\/messages\/([0-9a-f-]+)\/(read|star|trash|archive|restore|delete)$/i);
   if (actionMatch && request.method === 'POST') {
     let value: boolean | undefined;
     if (actionMatch[2] === 'read' || actionMatch[2] === 'star') {
@@ -62,7 +84,13 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
         value = true;
       }
     }
-    return updateMessageAction(env, user, actionMatch[1], actionMatch[2] as 'read' | 'star' | 'trash' | 'archive', value);
+    return updateMessageAction(
+      env,
+      user,
+      actionMatch[1],
+      actionMatch[2] as 'read' | 'star' | 'trash' | 'archive' | 'restore' | 'delete',
+      value
+    );
   }
 
   const attachmentMatch = path.match(/^\/api\/attachments\/([0-9a-f-]+)$/i);
