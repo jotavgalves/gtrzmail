@@ -7,6 +7,7 @@ import {
   resetAccountPassword,
   setAccountStatus
 } from './admin';
+import { listRecentContacts } from './contacts';
 import { assertSameOrigin, json, readJson, withSecurityHeaders } from './http';
 import {
   downloadAttachment,
@@ -65,6 +66,7 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   const adminPasswordMatch = path.match(/^\/api\/admin\/accounts\/([0-9a-f-]+)\/password$/i);
   if (adminPasswordMatch && request.method === 'POST') return resetAccountPassword(request, env, user, adminPasswordMatch[1]);
 
+  if (path === '/api/contacts' && request.method === 'GET') return listRecentContacts(env, user);
   if (path === '/api/messages' && request.method === 'GET') return listMessages(request, env, user);
   if (path === '/api/messages/stats' && request.method === 'GET') return messageStats(env, user);
   if (path === '/api/messages/send' && request.method === 'POST') return sendMessage(request, env, user);
