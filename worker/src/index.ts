@@ -26,6 +26,12 @@ import {
   updateContact
 } from './contacts';
 import { assertSameOrigin, json, readJson, withSecurityHeaders } from './http';
+import {
+  finalizeKeyRotation,
+  keyRotationStatus,
+  prepareKeyRotation,
+  rewrapKeyBatch
+} from './key-rotation';
 import { messageStats } from './mail';
 import {
   downloadAttachmentRich,
@@ -59,6 +65,14 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
     }
     return json({ error: 'Método não permitido.' }, 405, { allow: 'GET, POST' });
   }
+
+  // Rotation endpoints are intentionally outside same-origin/session auth because
+  // the local rotation utility talks to the deployed Worker directly. They are
+  // protected by a short-lived 256-bit bearer token stored only as a Worker secret.
+  if (path === '/api/internal/key-rotation/status' && request.method === 'GET') return keyRotationStatus(request, env);
+  if (path === '/api/internal/key-rotation/prepare' && request.method === 'POST') return prepareKeyRotation(request, env);
+  if (path === '/api/internal/key-rotation/batch' && request.method === 'POST') return rewrapKeyBatch(request, env);
+  if (path === '/api/internal/key-rotation/finalize' && request.method === 'POST') return finalizeKeyRotation(request, env);
 
   const requestOrigin = new URL(request.url).origin;
   const localOrigin = requestOrigin.startsWith('http://localhost:') || requestOrigin.startsWith('http://127.0.0.1:');
