@@ -81,6 +81,16 @@ export type SecurityStatus = {
   stepUpTtlSeconds: number;
 };
 
+export type SecurityEvent = {
+  id: string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  createdAt: number;
+  userId?: string | null;
+  email?: string | null;
+};
+
 export type AdminMailbox = { id: string; address: string; displayName: string; isDefault: boolean };
 export type AdminAccount = {
   id: string;
@@ -141,6 +151,8 @@ export const mailApi = {
   sessionAccounts: () => apiFetch<{ accounts: SessionAccount[] }>('/api/auth/accounts'),
   switchAccount: (userId: string) => apiFetch<{ ok: boolean; user: User }>('/api/auth/switch-account', { method: 'POST', body: JSON.stringify({ userId }) }),
   securityStatus: () => apiFetch<SecurityStatus>('/api/account/security'),
+  securityEvents: () => apiFetch<{ events: SecurityEvent[] }>('/api/account/security-events'),
+  adminSecurityEvents: () => apiFetch<{ events: SecurityEvent[] }>('/api/admin/security-events'),
   passwordStepUp: (password: string) => apiFetch<{ ok: boolean; validForSeconds: number }>('/api/account/reauth/password', { method: 'POST', body: JSON.stringify({ password }) }),
   passkeyStepUpOptions: () => apiFetch<{ challengeId: string; options: any; available: boolean }>('/api/account/reauth/passkey/options', { method: 'POST', body: '{}' }),
   passkeyStepUpVerify: (challengeId: string, response: unknown) => apiFetch<{ ok: boolean; validForSeconds: number }>('/api/account/reauth/passkey/verify', { method: 'POST', body: JSON.stringify({ challengeId, response }) }),
