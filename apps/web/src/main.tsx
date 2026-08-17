@@ -11,8 +11,10 @@ import './ui-fixes.css';
 import './mobile.css';
 import './mobile-account.css';
 import './mobile-native.css';
+import './mobile-compose-fixes.css';
 
 const MobileApp = lazy(() => import('./MobileApp'));
+const MobileUXFixes = lazy(() => import('./MobileUXFixes'));
 const AccountMenuOverlay = lazy(() => import('./AccountMenuOverlay'));
 const PushEnhancer = lazy(() => import('./PushEnhancer'));
 const ThreadListEnhancer = lazy(() => import('./ThreadListEnhancer'));
@@ -81,6 +83,7 @@ function RootApp() {
     return (
       <Suspense fallback={<main className="m-boot"><img src="/brand/gtrz-symbol.svg" alt="GTRZ" /></main>}>
         <MobileApp />
+        <MobileUXFixes />
       </Suspense>
     );
   }
