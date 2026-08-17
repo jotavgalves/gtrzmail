@@ -1,10 +1,11 @@
 .gtrz-mail-sandbox-frame {
   display: block;
   width: 100%;
-  min-height: 180px;
+  height: min(64vh, 760px);
+  min-height: 320px;
   border: 0;
   background: transparent;
-  color-scheme: light dark;
+  color-scheme: dark;
 }
 
 .rich-mail-body[data-gtrz-mail-sandboxed="1"] {
@@ -14,7 +15,7 @@
 
 @media (max-width: 820px) {
   .gtrz-mail-sandbox-frame {
-    min-height: 220px;
-    max-height: 68dvh;
+    height: 58dvh;
+    min-height: 280px;
   }
 }
