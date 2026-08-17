@@ -8,6 +8,10 @@ function inboxButton(): HTMLButtonElement | null {
     .find((button) => button.textContent?.toLowerCase().includes('entrada')) || null;
 }
 
+function refreshButton(): HTMLButtonElement | null {
+  return document.querySelector<HTMLButtonElement>('[aria-label="Atualizar"]');
+}
+
 async function wait(ms: number) {
   await new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -74,6 +78,13 @@ export default function PushEnhancer() {
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
     const message = (event: MessageEvent) => {
+      if (event.data?.type === 'gtrz-new-mail') {
+        // Web Push replaces aggressive foreground polling: invalidate the short
+        // memory cache and refresh only when something actually changed.
+        window.dispatchEvent(new Event('gtrz-force-refresh'));
+        refreshButton()?.click();
+        return;
+      }
       if (event.data?.type !== 'gtrz-open-message' || !event.data?.messageId) return;
       void openMessageInUi(String(event.data.messageId));
     };
