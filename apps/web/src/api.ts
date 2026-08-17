@@ -2,6 +2,7 @@ export type User = {
   id: string;
   email: string;
   displayName: string;
+  isAdmin: boolean;
 };
 
 export type Mailbox = {
@@ -40,7 +41,35 @@ export type MessageDetail = MessageSummary & {
   cc: string[];
   bcc: string[];
   bodyText: string;
+  messageId: string | null;
+  inReplyTo: string | null;
+  references: string[];
   attachments: Attachment[];
+};
+
+export type MessageFilters = {
+  starred?: boolean;
+  unread?: boolean;
+  hasAttachment?: boolean;
+};
+
+export type FolderStats = Record<string, { total: number; unread: number }>;
+
+export type AdminMailbox = {
+  id: string;
+  address: string;
+  displayName: string;
+  isDefault: boolean;
+};
+
+export type AdminAccount = {
+  id: string;
+  email: string;
+  displayName: string;
+  isActive: boolean;
+  isAdmin: boolean;
+  createdAt: number;
+  mailboxes: AdminMailbox[];
 };
 
 export class ApiError extends Error {
@@ -72,17 +101,47 @@ export const mailApi = {
     body: JSON.stringify({ email, password })
   }),
   logout: () => apiFetch<{ ok: boolean }>('/api/auth/logout', { method: 'POST', body: '{}' }),
-  list: (folder: string, query = '') => apiFetch<{ messages: MessageSummary[] }>(
-    `/api/messages?folder=${encodeURIComponent(folder)}&q=${encodeURIComponent(query)}`
-  ),
+  changePassword: (currentPassword: string, newPassword: string) => apiFetch<{ ok: boolean }>('/api/account/password', {
+    method: 'POST',
+    body: JSON.stringify({ currentPassword, newPassword })
+  }),
+  list: (folder: string, query = '', filters: MessageFilters = {}) => {
+    const params = new URLSearchParams({ folder, q: query });
+    if (filters.starred) params.set('starred', '1');
+    if (filters.unread) params.set('unread', '1');
+    if (filters.hasAttachment) params.set('hasAttachment', '1');
+    return apiFetch<{ messages: MessageSummary[] }>(`/api/messages?${params.toString()}`);
+  },
+  stats: () => apiFetch<{ folders: FolderStats }>('/api/messages/stats'),
   get: (id: string) => apiFetch<{ message: MessageDetail }>(`/api/messages/${id}`),
-  action: (id: string, action: 'read' | 'star' | 'trash' | 'archive', value?: boolean) =>
+  action: (id: string, action: 'read' | 'star' | 'trash' | 'archive' | 'restore' | 'delete', value?: boolean) =>
     apiFetch<{ ok: boolean }>(`/api/messages/${id}/${action}`, {
       method: 'POST',
       body: JSON.stringify({ value })
     }),
+  saveDraft: (payload: unknown) => apiFetch<{ ok: boolean; id: string; savedAt: number }>('/api/messages/draft', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
   send: (payload: unknown) => apiFetch<{ ok: boolean; messageId: string; providerId: string; status: string }>('/api/messages/send', {
     method: 'POST',
     body: JSON.stringify(payload)
+  }),
+  adminAccounts: () => apiFetch<{ accounts: AdminAccount[] }>('/api/admin/accounts'),
+  createAccount: (payload: { email: string; displayName: string; password: string }) => apiFetch<{ ok: boolean; id: string; mailboxId: string }>('/api/admin/accounts', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+  addMailbox: (payload: { userId: string; address: string; displayName: string }) => apiFetch<{ ok: boolean; id: string }>('/api/admin/mailboxes', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+  setAccountStatus: (id: string, active: boolean) => apiFetch<{ ok: boolean }>(`/api/admin/accounts/${id}/status`, {
+    method: 'POST',
+    body: JSON.stringify({ active })
+  }),
+  resetAccountPassword: (id: string, password: string) => apiFetch<{ ok: boolean }>(`/api/admin/accounts/${id}/password`, {
+    method: 'POST',
+    body: JSON.stringify({ password })
   })
 };
