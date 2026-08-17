@@ -23,11 +23,12 @@ const labels: Record<string, string> = {
   'admin.password_reset': 'Senha de conta redefinida',
   'admin.mailbox_created': 'Caixa adicional criada',
   'crypto.key_rotation_started': 'Rotação da chave mestra iniciada',
-  'crypto.key_rotation_completed': 'Rotação da chave mestra concluída'
+  'crypto.key_rotation_completed': 'Rotação da chave mestra concluída',
+  'mail.rate_limited': 'Envio bloqueado por limite de segurança'
 };
 
 function suspicious(action: string): boolean {
-  return action.includes('failed') || action.includes('mismatch') || action.includes('network_changed');
+  return action.includes('failed') || action.includes('mismatch') || action.includes('network_changed') || action === 'mail.rate_limited';
 }
 
 function when(timestamp: number): string {
@@ -61,7 +62,7 @@ export default function SecurityEventsPanel() {
       <h3><ShieldCheck size={15} /> Atividade de segurança</h3>
       <button className="icon-button" type="button" onClick={() => void load()} disabled={loading} aria-label="Atualizar atividade de segurança"><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>
     </div>
-    <p className="settings-hint">Logins, passkeys, mudanças de sessão e ações administrativas recentes. Se você não reconhecer um evento, troque a senha e encerre as outras sessões.</p>
+    <p className="settings-hint">Logins, passkeys, mudanças de sessão, bloqueios de envio e ações administrativas recentes. Se você não reconhecer um evento, troque a senha e encerre as outras sessões.</p>
     {loading && events.length === 0 ? <div className="settings-loading"><LoaderCircle size={18} className="spin" /> Carregando atividade</div> : null}
     {!loading && events.length === 0 ? <div className="settings-hint">Nenhum evento de segurança registrado ainda.</div> : null}
     <div className="security-event-list">
