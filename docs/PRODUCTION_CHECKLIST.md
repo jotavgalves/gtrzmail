@@ -4,18 +4,7 @@
 
 O GTRZ Mail usa Cloudflare Worker + D1 + R2, Cloudflare Email Routing para entrada e Resend para saída.
 
-As migrations `0001_initial.sql` e `0002_product_features.sql` já foram aplicadas no D1 remoto.
-
-A versão de rich email adiciona `0003_rich_email.sql`, que cria a assinatura HTML por conta.
-
-A versão de conversas + Web Push adiciona `0004_threads_push.sql`, que:
-
-- adiciona `messages.thread_id`;
-- cria índice para threads;
-- cria `push_subscriptions` por usuário/dispositivo;
-- preserva uma mesma inscrição do navegador para mais de uma conta GTRZ quando cada conta for usada naquele navegador.
-
-**Aplique todas as migrations pendentes antes de publicar o Worker novo.**
+As migrations devem ser aplicadas antes de publicar um Worker que dependa delas. O projeto atualmente possui migrations até `0007_key_rotation.sql`.
 
 ## Publicar esta versão
 
@@ -37,11 +26,9 @@ O `npm run deploy` já executa o build antes do Wrangler. O CI do branch valida 
 ## Conversas agrupadas
 
 - mensagens recebem `thread_id` derivado de `Message-ID`, `In-Reply-To` e `References`;
-- o reconciliador de threads corrige mensagens antigas quando existem referências RFC suficientes;
 - a lista mostra apenas uma linha por thread dentro da pasta atual;
 - a linha recebe contador quando a conversa contém mais de uma mensagem;
-- ao abrir uma thread, todas as mensagens relacionadas são mostradas na mesma conversa, em ordem cronológica;
-- cada mensagem da conversa pode ser expandida/recolhida;
+- mensagens antigas da conversa são buscadas sob demanda;
 - respostas enviadas e mensagens recebidas podem aparecer juntas na mesma conversa;
 - webhooks atuais do Resend alimentam `message_id` dos e-mails enviados quando o provedor disponibiliza esse campo.
 
@@ -50,101 +37,108 @@ O `npm run deploy` já executa o build antes do Wrangler. O CI do branch valida 
 - o navegador usa `PushManager` + Service Worker;
 - inscrições são gravadas em D1 e associadas à conta autenticada;
 - o Worker envia Web Push após a entrada ser persistida com sucesso;
-- payloads usam VAPID e `aes128gcm` via biblioteca compatível com Web Crypto/Cloudflare Workers;
 - inscrições expiradas (`404`/`410` no push service) são removidas automaticamente;
 - o Service Worker mostra a notificação mesmo sem uma aba do GTRZ Mail aberta;
-- clicar na notificação foca uma janela existente ou abre o PWA e tenta selecionar a mensagem/thread recebida;
-- depois de o usuário permitir notificações uma vez, a inscrição existente é sincronizada automaticamente com a conta ativa ao abrir o GTRZ Mail.
+- clicar na notificação foca uma janela existente ou abre o PWA e tenta selecionar a mensagem/thread recebida.
 
 ## Editor HTML e leitura rica
 
-- compositor `contentEditable` com negrito, itálico, sublinhado, tachado, títulos, listas, citações, alinhamento, links, cores, destaque e limpeza de formatação;
-- imagens PNG/JPG/GIF/WebP podem ser selecionadas, coladas ou arrastadas para dentro do corpo;
-- imagens inseridas no corpo são transformadas no Worker em anexos inline CID no envio;
-- o e-mail mantém uma versão `text/plain` como fallback e uma versão HTML sanitizada;
-- o HTML de rascunhos e enviados é armazenado no R2 criptografado com a mesma DEK da mensagem e IV próprio;
-- mensagens HTML recebidas são extraídas do MIME criptografado e sanitizadas antes de chegar à interface;
-- imagens CID recebidas são resolvidas para o endpoint autenticado de anexos;
-- anexos inline não aparecem duplicados na grade de anexos;
-- a assinatura HTML é configurável por conta e é inserida automaticamente em mensagens novas, respostas e encaminhamentos;
-- imagens dentro da assinatura são bloqueadas para reduzir superfície de abuso e rastreamento.
+- compositor `contentEditable` com negrito, itálico, sublinhado, listas, alinhamento, links, cores e limpeza de formatação;
+- imagens PNG/JPG/GIF/WebP podem ser inseridas no corpo e são transformadas em anexos inline CID;
+- o e-mail mantém `text/plain` como fallback e HTML sanitizado;
+- texto, HTML, RFC822 e anexos ficam criptografados no R2;
+- assinatura HTML é configurável por conta;
+- a sanitização decisiva ocorre no Worker.
 
-### Sanitização
+## Agenda / contatos
 
-A sanitização decisiva ocorre no Worker, mesmo que o navegador também faça uma limpeza preliminar ao colar conteúdo. Scripts, iframes, formulários, objetos, eventos `on*`, URLs `javascript:` e CSS fora da allowlist não são preservados. Links são normalizados com `noopener noreferrer`.
+- contatos persistentes por usuário no D1;
+- nome, telefone opcional, notas e favorito;
+- vários e-mails por contato, com rótulo e endereço principal;
+- criar, editar e excluir;
+- endereços recentes do histórico continuam disponíveis;
+- autocomplete em `Para`, `Cc` e `Cco` no desktop e mobile.
 
 ## Cache do PWA
 
-O frontend usa cache-first para tornar a navegação e os assets instantâneos sem congelar atualizações do produto.
-
-- navegações e recursos estáveis usam stale-while-revalidate: o cache responde imediatamente e a versão da rede atualiza o cache em segundo plano;
-- assets gerados pelo Vite em `/assets/` usam cache-first, pois o hash do nome muda quando o conteúdo muda;
-- `/sw.js` nunca é servido pelo próprio cache e o registro usa `updateViaCache: none`;
-- `/api/*` nunca é interceptado pelo service worker;
-- mensagens, sessões, contagens, estados de entrega e anexos continuam sempre dinâmicos.
+- navegações e recursos estáveis usam cache-first/stale-while-revalidate;
+- assets Vite com hash usam cache-first;
+- `/sw.js` não é servido pelo próprio cache;
+- `/api/*` nunca é interceptado pelo Service Worker;
+- mensagens, sessões, contagens, estados de entrega e anexos continuam dinâmicos.
 
 ## Alternância de contas
 
-A alternância usa sessões independentes com cookies HttpOnly separados por conta.
+A alternância usa sessões independentes com cookies HttpOnly separados por conta. Senhas e tokens de sessão não são armazenados no `localStorage`.
 
-- o chip com avatar, nome, e-mail e seta no topo direito é o seletor principal;
-- cada nova conta precisa ser autenticada uma vez antes de ficar disponível para troca rápida;
-- a senha e os tokens de sessão não são armazenados no `localStorage`;
-- `Nova caixa`/alias pertence ao mesmo usuário e não cria um login separado;
-- `Criar conta` no painel administrativo cria um usuário com login próprio.
+## Rotação segura da chave mestra
 
-## Chave mestra: não rotacionar às cegas
+A instalação original usa `MASTER_KEY_B64` como slot A. O sistema agora suporta dois slots de KEK e rewrap online das DEKs:
 
-`MASTER_KEY_B64` protege as chaves de dados das mensagens armazenadas. Trocar a chave sem reempacotar as chaves de dados existentes torna as mensagens antigas ilegíveis.
+- slot A: `MASTER_KEY_B64`;
+- slot B: `MASTER_KEY_SLOT_B_B64`;
+- `0007_key_rotation.sql` cria o estado persistente da rotação;
+- chaves antigas sem prefixo são versão 1;
+- novos invólucros usam `vN:<ciphertext>` em `messages.encrypted_key`;
+- durante a rotação, novas mensagens passam imediatamente a usar o slot novo;
+- as DEKs existentes são reembrulhadas em lotes sem recriptografar corpo, HTML, RFC822 ou anexos;
+- cada novo invólucro é testado com AES-GCM antes de substituir o antigo;
+- a chave antiga só é removida dos Worker secrets depois que nenhuma mensagem depende dela.
 
-1. Se só houver mensagens de teste e elas puderem ser descartadas, exclua os testes pelo próprio GTRZ Mail, confirme que não há conteúdo que precise ser preservado e então rode `npm run secret:rotate-master-key`.
-2. Se houver qualquer mensagem que precise ser preservada, NÃO execute a rotação simples. Primeiro implemente/execute uma operação de rewrap das DEKs com a chave antiga e a nova em uma janela coordenada.
-3. Nunca copie `MASTER_KEY_B64`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET` ou `VAPID_PRIVATE_KEY` para issues, commits, logs ou conversas.
+Primeiro publique a migration e o Worker compatível:
+
+```powershell
+npm run db:migrate:remote
+npm run deploy
+```
+
+Depois execute:
+
+```powershell
+npm run secret:rotate-master-key
+```
+
+O comando não imprime nem grava KEKs em arquivo e pode retomar uma rotação interrompida. Se houver falha depois do início do rewrap, **não apague manualmente** `MASTER_KEY_B64`, `MASTER_KEY_SLOT_B_B64` ou `KEY_ROTATION_TOKEN`; apenas corrija a causa e rode o comando novamente.
+
+Detalhes: `docs/KEY_ROTATION.md`.
 
 ## DNS e entregabilidade
 
-Execute:
+O domínio já foi validado com SPF, DKIM e DMARC passando em mensagem real recebida pelo Gmail. A política DMARC observada está em `p=REJECT; sp=REJECT`. O domínio `gtrz.com.br` também foi verificado no Google Postmaster Tools.
+
+Para diagnóstico:
 
 ```powershell
 npm run dns:check
 ```
 
-Se DMARC estiver ausente, use inicialmente uma política de observação e endureça depois de validar o tráfego legítimo.
-
-```text
-v=DMARC1; p=none; adkim=s; aspf=s
-```
-
-Depois de observar autenticação e reputação, migre gradualmente para `quarantine` e, por fim, `reject` se todo o tráfego legítimo estiver alinhado.
+Não reduza a política DMARC sem motivo operacional comprovado.
 
 ## Testes mínimos após deploy
 
 1. Login e logout.
-2. Abrir o seletor de contas e alternar entre duas contas autenticadas.
-3. Abrir Configurações, criar uma assinatura formatada, salvar e reabrir.
-4. Criar uma mensagem com negrito, itálico, sublinhado, lista, link, cor e destaque.
-5. Colar uma imagem no corpo, enviar para Gmail e confirmar que ela aparece inline.
-6. Abrir a mensagem em Enviados e confirmar que HTML e imagem inline são exibidos.
-7. Criar um rascunho rico, fechar o composer, reabrir e confirmar preservação da formatação.
-8. Receber um e-mail HTML externo e confirmar renderização sanitizada.
-9. Abrir e baixar um anexo tradicional.
-10. Responder uma mensagem e confirmar que a lista mostra uma única conversa com contador maior que 1.
-11. Abrir a conversa e confirmar mensagens recebidas/enviadas agrupadas cronologicamente.
-12. Responder a todos e encaminhar.
-13. Arquivar, mover para lixeira, restaurar e excluir permanentemente.
-14. Enviar mensagem e confirmar `sent → delivered` pelo webhook.
-15. Em Configurações, clicar `Ativar notificações` e permitir notificações no navegador.
-16. Fechar completamente o GTRZ Mail/PWA, enviar um e-mail externo para a conta e confirmar a notificação do sistema operacional.
-17. Clicar na notificação e confirmar abertura/foco do GTRZ Mail e seleção da mensagem quando ela estiver na Entrada.
-18. Reabrir o PWA e confirmar carregamento imediato pelo cache.
+2. Alternar entre duas contas autenticadas.
+3. Criar assinatura formatada.
+4. Enviar HTML com imagem inline e anexo.
+5. Reabrir Enviados e confirmar HTML/anexos.
+6. Criar e reabrir rascunho.
+7. Receber e-mail HTML externo.
+8. Responder, responder a todos e encaminhar.
+9. Confirmar uma única conversa/thread quando houver respostas relacionadas.
+10. Arquivar, lixeira, restaurar e excluir permanentemente.
+11. Confirmar `sent → delivered` pelo webhook.
+12. Ativar Web Push, fechar totalmente o PWA e confirmar notificação.
+13. Clicar na notificação e confirmar abertura da mensagem correta.
+14. Criar, editar e excluir contato e testar autocomplete em `Para/Cc/Cco`.
+15. Após uma rotação de KEK, abrir mensagem antiga e baixar anexo antigo para confirmar legibilidade.
 
 ## Observações de segurança
 
 - O R2 permanece privado.
-- Texto, HTML de mensagem e anexos permanecem criptografados em nível de aplicação.
+- Texto, HTML, RFC822 e anexos permanecem criptografados em nível de aplicação.
 - Metadados necessários à busca, threading e roteamento ficam no D1 em texto claro.
-- Endpoints e chaves públicas de inscrição Web Push ficam no D1; a chave VAPID privada fica somente como Worker secret.
-- A assinatura é configuração de conta e fica no D1 já sanitizada.
+- A DEK de cada mensagem é protegida por envelope encryption AES-256-GCM.
+- A rotação troca apenas o invólucro da DEK; não altera o ciphertext dos conteúdos.
 - Sessões usam cookie `HttpOnly`, `Secure` e `SameSite=Strict`.
 - Senhas usam PBKDF2-HMAC-SHA256 com 100.000 iterações por limitação atual do runtime usado pelo Worker.
 - O painel administrativo só é exposto a usuários com `is_admin = 1`.
