@@ -71,6 +71,15 @@ export async function getSessionUserHardened(request: Request, env: AppEnv): Pro
   return getSessionUser(request, env);
 }
 
+export async function sessionResponseHardened(request: Request, env: AppEnv): Promise<Response> {
+  const user = await getSessionUserHardened(request, env);
+  if (!user) return json({ user: null }, 401);
+  const mailboxes = await env.DB.prepare(
+    'SELECT id, address, display_name, is_default FROM mailboxes WHERE user_id = ? ORDER BY is_default DESC, address ASC'
+  ).bind(user.id).all<{ id: string; address: string; display_name: string; is_default: number }>();
+  return json({ user, mailboxes: mailboxes.results });
+}
+
 export async function listUserSessions(request: Request, env: AppEnv, user: SessionUser): Promise<Response> {
   const currentId = await currentSessionId(request);
   const now = Math.floor(Date.now() / 1000);
