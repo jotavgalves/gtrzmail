@@ -2,7 +2,6 @@ import type { AppEnv } from './env';
 import {
   listSessionAccounts,
   logout,
-  sessionResponse,
   switchAccount
 } from './auth';
 import {
@@ -10,7 +9,8 @@ import {
   getSessionUserHardened,
   listUserSessions,
   revokeOtherSessions,
-  revokeUserSession
+  revokeUserSession,
+  sessionResponseHardened
 } from './account-security';
 import { downloadAttachmentHardened } from './attachment-security';
 import {
@@ -93,7 +93,7 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   if (path === '/api/auth/passkey/options' && request.method === 'POST') return loginOptions(request, env);
   if (path === '/api/auth/passkey/verify' && request.method === 'POST') return verifyLogin(request, env);
   if (path === '/api/auth/logout' && request.method === 'POST') return logout(request, env);
-  if (path === '/api/session' && request.method === 'GET') return sessionResponse(request, env);
+  if (path === '/api/session' && request.method === 'GET') return sessionResponseHardened(request, env);
 
   const user = await getSessionUserHardened(request, env);
   if (!user) return json({ error: 'Sessão expirada.' }, 401);
