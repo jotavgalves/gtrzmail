@@ -26,8 +26,11 @@ type MessageRow = {
   mailbox_id: string;
   direction: 'inbound' | 'outbound';
   folder: string;
+  previous_folder: string | null;
   provider_id: string | null;
   message_id: string | null;
+  in_reply_to: string | null;
+  references_json: string;
   from_name: string | null;
   from_address: string;
   to_json: string;
@@ -61,6 +64,20 @@ type SendPayload = {
   text?: string;
   attachments?: OutboundAttachment[];
   inReplyTo?: string;
+  references?: string[];
+  draftId?: string;
+};
+
+type DraftPayload = {
+  draftId?: string;
+  fromMailboxId?: string;
+  to?: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject?: string;
+  text?: string;
+  inReplyTo?: string;
+  references?: string[];
 };
 
 type StoredAttachment = {
@@ -71,6 +88,8 @@ type StoredAttachment = {
   content_id: string | null;
   disposition: string | null;
 };
+
+type MessageAction = 'read' | 'star' | 'trash' | 'archive' | 'restore' | 'delete';
 
 function mailboxFromAddress(address: Address | undefined): Mailbox | null {
   if (!address) return null;
@@ -137,6 +156,11 @@ function normalizeRecipients(value: string[] | undefined): string[] {
   return [...new Set(normalized)];
 }
 
+function normalizeReferences(value: string[] | undefined): string[] {
+  if (!value) return [];
+  return [...new Set(value.map((item) => item.trim()).filter(Boolean))].slice(-50);
+}
+
 function attachmentBinary(value: unknown): ArrayBuffer | Uint8Array<ArrayBuffer> {
   if (value instanceof ArrayBuffer) return value;
   if (typeof value === 'string') return encoder.encode(value);
@@ -160,6 +184,17 @@ async function incomingMailbox(env: AppEnv, destination: string): Promise<Mailbo
   ).first<MailboxRow>();
 }
 
+async function ownedMailbox(env: AppEnv, userId: string, mailboxId?: string): Promise<MailboxRow | null> {
+  if (mailboxId) {
+    return env.DB.prepare(
+      'SELECT id, user_id, address, display_name, is_default FROM mailboxes WHERE id = ? AND user_id = ? LIMIT 1'
+    ).bind(mailboxId, userId).first<MailboxRow>();
+  }
+  return env.DB.prepare(
+    'SELECT id, user_id, address, display_name, is_default FROM mailboxes WHERE user_id = ? ORDER BY is_default DESC LIMIT 1'
+  ).bind(userId).first<MailboxRow>();
+}
+
 async function audit(
   env: AppEnv,
   userId: string | null,
@@ -171,6 +206,29 @@ async function audit(
   await env.DB.prepare(
     'INSERT INTO audit_logs (id, user_id, action, target_type, target_id, created_at) VALUES (?, ?, ?, ?, ?, ?)'
   ).bind(crypto.randomUUID(), userId, action, targetType, targetId, now).run();
+}
+
+async function userMessage(
+  env: AppEnv,
+  userId: string,
+  messageId: string
+): Promise<MessageRow | null> {
+  return env.DB.prepare(
+    `SELECT m.* FROM messages m
+     JOIN mailboxes mb ON mb.id = m.mailbox_id
+     WHERE m.id = ? AND mb.user_id = ? LIMIT 1`
+  ).bind(messageId, userId).first<MessageRow>();
+}
+
+async function deleteMessageData(env: AppEnv, row: MessageRow): Promise<void> {
+  const attachments = await env.DB.prepare(
+    'SELECT r2_key FROM attachments WHERE message_id = ?'
+  ).bind(row.id).all<{ r2_key: string }>();
+  await Promise.all([
+    env.MAIL_BUCKET.delete(row.r2_key),
+    ...attachments.results.map((attachment) => env.MAIL_BUCKET.delete(attachment.r2_key))
+  ]);
+  await env.DB.prepare('DELETE FROM messages WHERE id = ?').bind(row.id).run();
 }
 
 export async function receiveEmail(message: ForwardableEmailMessage, env: AppEnv): Promise<void> {
@@ -207,8 +265,8 @@ export async function receiveEmail(message: ForwardableEmailMessage, env: AppEnv
     `INSERT INTO messages (
       id, mailbox_id, direction, folder, provider_id, message_id, in_reply_to, references_json,
       from_name, from_address, to_json, cc_json, bcc_json, subject, preview, storage_type,
-      r2_key, encrypted_key, key_iv, body_iv, is_read, is_starred, sent_status, received_at, created_at
-    ) VALUES (?, ?, 'inbound', 'inbox', NULL, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, 'rfc822', ?, ?, ?, ?, 0, 0, NULL, ?, ?)`
+      r2_key, encrypted_key, key_iv, body_iv, is_read, is_starred, sent_status, received_at, created_at, previous_folder
+    ) VALUES (?, ?, 'inbound', 'inbox', NULL, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, 'rfc822', ?, ?, ?, ?, 0, 0, NULL, ?, ?, NULL)`
   ).bind(
     id,
     mailbox.id,
@@ -274,6 +332,8 @@ export async function listMessages(
   const folder = allowedFolders.has(requestedFolder) ? requestedFolder : 'inbox';
   const query = (url.searchParams.get('q') || '').trim().slice(0, 120);
   const starred = url.searchParams.get('starred') === '1';
+  const unread = url.searchParams.get('unread') === '1';
+  const hasAttachment = url.searchParams.get('hasAttachment') === '1';
   const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit') || '50')));
 
   let sql = `SELECT m.id, m.direction, m.folder, m.from_name, m.from_address, m.to_json, m.subject, m.preview,
@@ -285,10 +345,12 @@ export async function listMessages(
   const binds: Array<string | number> = [user.id, folder];
 
   if (starred) sql += ' AND m.is_starred = 1';
+  if (unread) sql += ' AND m.is_read = 0';
+  if (hasAttachment) sql += ' AND EXISTS (SELECT 1 FROM attachments ax WHERE ax.message_id = m.id)';
   if (query) {
-    sql += ' AND (m.subject LIKE ? OR m.from_address LIKE ? OR m.from_name LIKE ? OR m.preview LIKE ?)';
+    sql += ' AND (m.subject LIKE ? OR m.from_address LIKE ? OR m.from_name LIKE ? OR m.preview LIKE ? OR m.to_json LIKE ?)';
     const like = `%${query}%`;
-    binds.push(like, like, like, like);
+    binds.push(like, like, like, like, like);
   }
 
   sql += ' ORDER BY m.received_at DESC LIMIT ?';
@@ -329,16 +391,19 @@ export async function listMessages(
   });
 }
 
-async function userMessage(
-  env: AppEnv,
-  userId: string,
-  messageId: string
-): Promise<MessageRow | null> {
-  return env.DB.prepare(
-    `SELECT m.* FROM messages m
+export async function messageStats(env: AppEnv, user: SessionUser): Promise<Response> {
+  const result = await env.DB.prepare(
+    `SELECT m.folder, COUNT(*) AS total,
+            SUM(CASE WHEN m.is_read = 0 THEN 1 ELSE 0 END) AS unread
+     FROM messages m
      JOIN mailboxes mb ON mb.id = m.mailbox_id
-     WHERE m.id = ? AND mb.user_id = ? LIMIT 1`
-  ).bind(messageId, userId).first<MessageRow>();
+     WHERE mb.user_id = ?
+     GROUP BY m.folder`
+  ).bind(user.id).all<{ folder: string; total: number; unread: number }>();
+
+  const folders: Record<string, { total: number; unread: number }> = {};
+  for (const row of result.results) folders[row.folder] = { total: row.total, unread: row.unread || 0 };
+  return json({ folders });
 }
 
 export async function getMessage(
@@ -370,7 +435,7 @@ export async function getMessage(
     'SELECT id, filename, mime_type, size_bytes, content_id, disposition FROM attachments WHERE message_id = ? ORDER BY created_at ASC'
   ).bind(row.id).all<StoredAttachment>();
 
-  if (!row.is_read) {
+  if (!row.is_read && row.folder !== 'drafts') {
     await env.DB.prepare('UPDATE messages SET is_read = 1 WHERE id = ?').bind(row.id).run();
   }
 
@@ -386,7 +451,10 @@ export async function getMessage(
       bcc: parseJsonArray(row.bcc_json),
       subject: row.subject,
       bodyText,
-      isRead: true,
+      messageId: row.message_id,
+      inReplyTo: row.in_reply_to,
+      references: parseJsonArray(row.references_json),
+      isRead: row.folder === 'drafts' ? row.is_read === 1 : true,
       isStarred: row.is_starred === 1,
       sentStatus: row.sent_status,
       receivedAt: row.received_at,
@@ -406,7 +474,7 @@ export async function updateMessageAction(
   env: AppEnv,
   user: SessionUser,
   messageId: string,
-  action: 'read' | 'star' | 'trash' | 'archive',
+  action: MessageAction,
   value?: boolean
 ): Promise<Response> {
   const row = await userMessage(env, user.id, messageId);
@@ -421,13 +489,25 @@ export async function updateMessageAction(
       .bind(value === false ? 0 : 1, messageId)
       .run();
   } else if (action === 'trash') {
-    await env.DB.prepare("UPDATE messages SET folder = 'trash' WHERE id = ?")
+    if (row.folder !== 'trash') {
+      await env.DB.prepare("UPDATE messages SET previous_folder = folder, folder = 'trash' WHERE id = ?")
+        .bind(messageId)
+        .run();
+    }
+  } else if (action === 'archive') {
+    await env.DB.prepare("UPDATE messages SET folder = 'archive', previous_folder = NULL WHERE id = ?")
       .bind(messageId)
+      .run();
+  } else if (action === 'restore') {
+    const fallback = row.direction === 'inbound' ? 'inbox' : row.sent_status === 'draft' ? 'drafts' : 'sent';
+    const restoreFolder = row.previous_folder && ['inbox', 'sent', 'drafts', 'archive', 'spam'].includes(row.previous_folder)
+      ? row.previous_folder
+      : fallback;
+    await env.DB.prepare('UPDATE messages SET folder = ?, previous_folder = NULL WHERE id = ?')
+      .bind(restoreFolder, messageId)
       .run();
   } else {
-    await env.DB.prepare("UPDATE messages SET folder = 'archive' WHERE id = ?")
-      .bind(messageId)
-      .run();
+    await deleteMessageData(env, row);
   }
 
   await audit(env, user.id, `mail.${action}`, 'message', messageId);
@@ -472,6 +552,72 @@ export async function downloadAttachment(
   return new Response(decrypted, { status: 200, headers });
 }
 
+export async function saveDraft(
+  request: Request,
+  env: AppEnv,
+  user: SessionUser
+): Promise<Response> {
+  let payload: DraftPayload;
+  try {
+    payload = await readJson<DraftPayload>(request);
+  } catch {
+    return json({ error: 'Rascunho inválido.' }, 400);
+  }
+
+  const mailbox = await ownedMailbox(env, user.id, payload.fromMailboxId);
+  if (!mailbox) return json({ error: 'Caixa de envio não configurada.' }, 400);
+
+  const to = normalizeRecipients(payload.to);
+  const cc = normalizeRecipients(payload.cc);
+  const bcc = normalizeRecipients(payload.bcc);
+  const subject = (payload.subject || '').trim().slice(0, 998);
+  const text = (payload.text || '').slice(0, 500_000);
+  const references = normalizeReferences(payload.references);
+  const now = Math.floor(Date.now() / 1000);
+  const envelope = await createEnvelope(encoder.encode(text), env);
+
+  if (payload.draftId) {
+    const existing = await userMessage(env, user.id, payload.draftId);
+    if (!existing || existing.folder !== 'drafts') return json({ error: 'Rascunho não encontrado.' }, 404);
+    const r2Key = `drafts/${payload.draftId}/body.txt.enc`;
+    await env.MAIL_BUCKET.put(r2Key, envelope.ciphertext, {
+      httpMetadata: { contentType: 'application/octet-stream' },
+      customMetadata: { version: 'gtrz-envelope-v1' }
+    });
+    if (existing.r2_key !== r2Key) await env.MAIL_BUCKET.delete(existing.r2_key);
+    await env.DB.prepare(
+      `UPDATE messages SET mailbox_id = ?, from_name = ?, from_address = ?, to_json = ?, cc_json = ?, bcc_json = ?,
+       subject = ?, preview = ?, in_reply_to = ?, references_json = ?, r2_key = ?, encrypted_key = ?, key_iv = ?, body_iv = ?,
+       received_at = ?, sent_status = 'draft', is_read = 1 WHERE id = ?`
+    ).bind(
+      mailbox.id, mailbox.display_name, mailbox.address, JSON.stringify(to), JSON.stringify(cc), JSON.stringify(bcc),
+      subject, previewOf(text), payload.inReplyTo || null, JSON.stringify(references), r2Key,
+      envelope.encryptedKey, envelope.keyIv, envelope.bodyIv, now, existing.id
+    ).run();
+    return json({ ok: true, id: existing.id, savedAt: now });
+  }
+
+  const id = crypto.randomUUID();
+  const r2Key = `drafts/${id}/body.txt.enc`;
+  await env.MAIL_BUCKET.put(r2Key, envelope.ciphertext, {
+    httpMetadata: { contentType: 'application/octet-stream' },
+    customMetadata: { version: 'gtrz-envelope-v1' }
+  });
+  await env.DB.prepare(
+    `INSERT INTO messages (
+      id, mailbox_id, direction, folder, provider_id, message_id, in_reply_to, references_json,
+      from_name, from_address, to_json, cc_json, bcc_json, subject, preview, storage_type,
+      r2_key, encrypted_key, key_iv, body_iv, is_read, is_starred, sent_status, received_at, created_at, previous_folder
+    ) VALUES (?, ?, 'outbound', 'drafts', NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'text', ?, ?, ?, ?, 1, 0, 'draft', ?, ?, NULL)`
+  ).bind(
+    id, mailbox.id, payload.inReplyTo || null, JSON.stringify(references), mailbox.display_name, mailbox.address,
+    JSON.stringify(to), JSON.stringify(cc), JSON.stringify(bcc), subject, previewOf(text), r2Key,
+    envelope.encryptedKey, envelope.keyIv, envelope.bodyIv, now, now
+  ).run();
+  await audit(env, user.id, 'mail.draft_created', 'message', id);
+  return json({ ok: true, id, savedAt: now }, 201);
+}
+
 export async function sendMessage(
   request: Request,
   env: AppEnv,
@@ -489,16 +635,10 @@ export async function sendMessage(
   const bcc = normalizeRecipients(payload.bcc);
   const subject = (payload.subject || '').trim().slice(0, 998) || '(sem assunto)';
   const text = (payload.text || '').slice(0, 500_000);
+  const references = normalizeReferences(payload.references);
   if (!to.length) return json({ error: 'Informe pelo menos um destinatário.' }, 400);
 
-  const mailbox = payload.fromMailboxId
-    ? await env.DB.prepare(
-      'SELECT id, user_id, address, display_name, is_default FROM mailboxes WHERE id = ? AND user_id = ? LIMIT 1'
-    ).bind(payload.fromMailboxId, user.id).first<MailboxRow>()
-    : await env.DB.prepare(
-      'SELECT id, user_id, address, display_name, is_default FROM mailboxes WHERE user_id = ? ORDER BY is_default DESC LIMIT 1'
-    ).bind(user.id).first<MailboxRow>();
-
+  const mailbox = await ownedMailbox(env, user.id, payload.fromMailboxId);
   if (!mailbox) return json({ error: 'Caixa de envio não configurada.' }, 400);
 
   const attachments = (payload.attachments || []).slice(0, 20);
@@ -536,12 +676,13 @@ export async function sendMessage(
     `INSERT INTO messages (
       id, mailbox_id, direction, folder, provider_id, message_id, in_reply_to, references_json,
       from_name, from_address, to_json, cc_json, bcc_json, subject, preview, storage_type,
-      r2_key, encrypted_key, key_iv, body_iv, is_read, is_starred, sent_status, received_at, created_at
-    ) VALUES (?, ?, 'outbound', 'sent', NULL, NULL, ?, '[]', ?, ?, ?, ?, ?, ?, ?, 'text', ?, ?, ?, ?, 1, 0, 'sending', ?, ?)`
+      r2_key, encrypted_key, key_iv, body_iv, is_read, is_starred, sent_status, received_at, created_at, previous_folder
+    ) VALUES (?, ?, 'outbound', 'sent', NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'text', ?, ?, ?, ?, 1, 0, 'sending', ?, ?, NULL)`
   ).bind(
     id,
     mailbox.id,
     payload.inReplyTo || null,
+    JSON.stringify(references),
     mailbox.display_name,
     mailbox.address,
     JSON.stringify(to),
@@ -594,7 +735,12 @@ export async function sendMessage(
   };
   if (cc.length) resendPayload.cc = cc;
   if (bcc.length) resendPayload.bcc = bcc;
-  if (payload.inReplyTo) resendPayload.headers = { 'In-Reply-To': payload.inReplyTo };
+  if (payload.inReplyTo || references.length) {
+    const headers: Record<string, string> = {};
+    if (payload.inReplyTo) headers['In-Reply-To'] = payload.inReplyTo;
+    if (references.length) headers.References = references.join(' ');
+    resendPayload.headers = headers;
+  }
   if (decodedAttachments.length) {
     resendPayload.attachments = decodedAttachments.map((attachment) => ({
       filename: attachment.filename,
@@ -630,6 +776,12 @@ export async function sendMessage(
   await env.DB.prepare("UPDATE messages SET provider_id = ?, sent_status = 'sent' WHERE id = ?")
     .bind(providerBody.id, id)
     .run();
+
+  if (payload.draftId) {
+    const draft = await userMessage(env, user.id, payload.draftId);
+    if (draft?.folder === 'drafts') await deleteMessageData(env, draft);
+  }
+
   await audit(env, user.id, 'mail.sent', 'message', id);
 
   return json({
