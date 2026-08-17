@@ -1,7 +1,6 @@
 import type { AppEnv } from './env';
 import {
   listSessionAccounts,
-  login,
   logout,
   sessionResponse,
   switchAccount
@@ -38,6 +37,7 @@ import {
   prepareKeyRotation,
   rewrapKeyBatch
 } from './key-rotation';
+import { loginHardened } from './login-security';
 import { messageStats } from './mail';
 import { saveDraftRich, sendMessageRich } from './mail-rich';
 import { updateMessageActionRich } from './message-actions-rich';
@@ -88,7 +88,7 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   const localOrigin = requestOrigin.startsWith('http://localhost:') || requestOrigin.startsWith('http://127.0.0.1:');
   if (!assertSameOrigin(request, localOrigin ? requestOrigin : env.APP_ORIGIN)) return json({ error: 'Origem não autorizada.' }, 403);
 
-  if (path === '/api/auth/login' && request.method === 'POST') return login(request, env);
+  if (path === '/api/auth/login' && request.method === 'POST') return loginHardened(request, env);
   if (path === '/api/auth/passkey/options' && request.method === 'POST') return loginOptions(request, env);
   if (path === '/api/auth/passkey/verify' && request.method === 'POST') return verifyLogin(request, env);
   if (path === '/api/auth/logout' && request.method === 'POST') return logout(request, env);
@@ -123,7 +123,10 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   if (path === '/api/push/subscribe' && request.method === 'POST') return subscribePush(request, env, user);
   if (path === '/api/push/unsubscribe' && request.method === 'POST') return unsubscribePush(request, env, user);
 
-  if (path === '/api/admin/accounts' && request.method === 'GET') return listAccounts(env, user);
+  if (path === '/api/admin/accounts' && request.method === 'GET') {
+    const denied = await requireRecentStepUp(request, env, user);
+    return denied || listAccounts(env, user);
+  }
   if (path === '/api/admin/accounts' && request.method === 'POST') {
     const denied = await requireRecentStepUp(request, env, user);
     return denied || createAccount(request, env, user);
@@ -132,7 +135,6 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
     const denied = await requireRecentStepUp(request, env, user);
     return denied || addMailbox(request, env, user);
   }
-
   const adminStatusMatch = path.match(/^\/api\/admin\/accounts\/([0-9a-f-]+)\/status$/i);
   if (adminStatusMatch && request.method === 'POST') {
     const denied = await requireRecentStepUp(request, env, user);
