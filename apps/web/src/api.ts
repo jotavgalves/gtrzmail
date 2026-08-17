@@ -62,6 +62,10 @@ export type RecentContact = {
   lastUsedAt: number;
 };
 
+export type SessionAccount = User & {
+  current: boolean;
+};
+
 export type AdminMailbox = {
   id: string;
   address: string;
@@ -108,6 +112,11 @@ export const mailApi = {
     body: JSON.stringify({ email, password })
   }),
   logout: () => apiFetch<{ ok: boolean }>('/api/auth/logout', { method: 'POST', body: '{}' }),
+  sessionAccounts: () => apiFetch<{ accounts: SessionAccount[] }>('/api/auth/accounts'),
+  switchAccount: (userId: string) => apiFetch<{ ok: boolean; user: User }>('/api/auth/switch-account', {
+    method: 'POST',
+    body: JSON.stringify({ userId })
+  }),
   changePassword: (currentPassword: string, newPassword: string) => apiFetch<{ ok: boolean }>('/api/account/password', {
     method: 'POST',
     body: JSON.stringify({ currentPassword, newPassword })
