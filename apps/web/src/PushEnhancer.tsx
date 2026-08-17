@@ -50,17 +50,30 @@ export default function PushEnhancer() {
 
   useEffect(() => {
     if (!pushSupported()) return;
-    let finished = false;
-    const trySync = () => {
-      if (finished || !document.querySelector('.app-shell')) return;
-      finished = true;
-      observer.disconnect();
+
+    let cancelled = false;
+    let synced = false;
+    const syncOnce = () => {
+      if (cancelled || synced || !document.querySelector('.app-shell')) return false;
+      synced = true;
       void syncExistingPushSubscription().catch(() => undefined);
+      return true;
     };
-    const observer = new MutationObserver(trySync);
-    observer.observe(document.body, { childList: true, subtree: true });
-    trySync();
-    return () => observer.disconnect();
+
+    if (syncOnce()) return () => { cancelled = true; };
+
+    const root = document.getElementById('root') || document.body;
+    const observer = new MutationObserver(() => {
+      if (syncOnce()) observer.disconnect();
+    });
+    observer.observe(root, { childList: true, subtree: true });
+
+    const timeout = window.setTimeout(() => observer.disconnect(), 10_000);
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+      window.clearTimeout(timeout);
+    };
   }, []);
 
   useEffect(() => {
@@ -87,14 +100,27 @@ export default function PushEnhancer() {
   useEffect(() => {
     const decorate = () => {
       const button = notificationButton();
-      if (!button) return;
+      if (!button) return false;
       button.setAttribute('data-web-push', '1');
       button.title = 'Ativar notificações mesmo com o GTRZ Mail fechado';
+      return true;
     };
-    decorate();
-    const observer = new MutationObserver(decorate);
-    observer.observe(document.body, { childList: true, subtree: true });
 
+    if (!decorate()) {
+      const root = document.getElementById('root') || document.body;
+      const observer = new MutationObserver(() => {
+        if (decorate()) observer.disconnect();
+      });
+      observer.observe(root, { childList: true, subtree: true });
+      const timeout = window.setTimeout(() => observer.disconnect(), 15_000);
+      return () => {
+        observer.disconnect();
+        window.clearTimeout(timeout);
+      };
+    }
+  }, []);
+
+  useEffect(() => {
     const click = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
       const button = target?.closest<HTMLButtonElement>('button[data-web-push="1"]');
@@ -110,10 +136,7 @@ export default function PushEnhancer() {
     };
 
     document.addEventListener('click', click, true);
-    return () => {
-      observer.disconnect();
-      document.removeEventListener('click', click, true);
-    };
+    return () => document.removeEventListener('click', click, true);
   }, [working]);
 
   return (
