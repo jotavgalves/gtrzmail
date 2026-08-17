@@ -15,6 +15,7 @@ import {
   resetAccountPassword,
   setAccountStatus
 } from './admin';
+import { bootstrapApp } from './bootstrap';
 import { listRecentContacts } from './contacts';
 import { assertSameOrigin, json, readJson, withSecurityHeaders } from './http';
 import { messageStats } from './mail';
@@ -69,6 +70,7 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   const user = await getSessionUser(request, env);
   if (!user) return json({ error: 'Sessão expirada.' }, 401);
 
+  if (path === '/api/bootstrap' && request.method === 'GET') return bootstrapApp(request, env, user);
   if (path === '/api/auth/accounts' && request.method === 'GET') return listSessionAccounts(request, env, user);
   if (path === '/api/auth/switch-account' && request.method === 'POST') return switchAccount(request, env, user);
   if (path === '/api/account/password' && request.method === 'POST') return changePassword(request, env, user);
