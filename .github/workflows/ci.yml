@@ -45,3 +45,7 @@ jobs:
 
       - name: Validate Worker bundle
         run: npm run deploy:dry
+
+      - name: Remote production security smoke
+        shell: bash
+        run: bash scripts/remote-security-smoke.sh
