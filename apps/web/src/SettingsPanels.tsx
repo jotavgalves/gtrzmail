@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { CheckCircle2, KeyRound, LoaderCircle, LogIn, MailPlus, ShieldCheck, UserPlus, Users } from 'lucide-react';
+import { CheckCircle2, KeyRound, LoaderCircle, LogIn, MailPlus, PenLine, ShieldCheck, UserPlus, Users } from 'lucide-react';
 import { mailApi, type AdminAccount, type SessionAccount } from './api';
+import RichTextEditor from './RichTextEditor';
 
 function AccountSessionsBlock({ onNotice }: { onNotice: (message: string) => void }) {
   const [accounts, setAccounts] = useState<SessionAccount[]>([]);
@@ -101,6 +102,56 @@ function AccountSessionsBlock({ onNotice }: { onNotice: (message: string) => voi
       )}
 
       {error && <div className="form-error settings-error">{error}</div>}
+    </section>
+  );
+}
+
+export function SignaturePanel({ onNotice }: { onNotice: (message: string) => void }) {
+  const [html, setHtml] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    mailApi.signature()
+      .then((result) => setHtml(result.html))
+      .catch((err) => setError(err instanceof Error ? err.message : 'Não foi possível carregar a assinatura.'))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      const result = await mailApi.updateSignature(html);
+      setHtml(result.html);
+      onNotice('Assinatura salva.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível salvar a assinatura.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="settings-section signature-panel">
+      <h3><PenLine size={15} /> Assinatura</h3>
+      <p className="settings-hint">A assinatura é adicionada automaticamente às novas mensagens, respostas e encaminhamentos. Formatação e links são permitidos; imagens da assinatura ficam bloqueadas por segurança.</p>
+      {loading ? <div className="settings-loading"><LoaderCircle size={18} className="spin" /> Carregando assinatura</div> : <>
+        <RichTextEditor
+          value={html}
+          compact
+          allowImages={false}
+          placeholder="Ex.: João Gonçalves · GTRZ Eventos"
+          onChange={(nextHtml) => setHtml(nextHtml)}
+          onError={setError}
+        />
+        {error && <div className="form-error settings-error">{error}</div>}
+        <button className="secondary-button signature-save" type="button" disabled={saving} onClick={() => void save()}>
+          {saving ? <LoaderCircle size={15} className="spin" /> : <PenLine size={15} />}
+          Salvar assinatura
+        </button>
+      </>}
     </section>
   );
 }
