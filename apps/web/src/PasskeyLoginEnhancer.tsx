@@ -10,12 +10,14 @@ export default function PasskeyLoginEnhancer() {
 
   useEffect(() => {
     const root = document.getElementById('root');
-    if (!root) return;
+    if (!root || !passkeysSupported()) return;
+    let cancelled = false;
+    const timers: number[] = [];
 
     const locate = () => {
-      if (host?.isConnected) return;
+      if (cancelled || host?.isConnected) return;
       const form = root.querySelector<HTMLFormElement>('form.login-form, form.m-login-card');
-      if (!form) { setHost(null); return; }
+      if (!form) return;
       let target = form.querySelector<HTMLElement>('[data-gtrz-passkey-login-host]');
       if (!target) {
         target = document.createElement('div');
@@ -23,16 +25,20 @@ export default function PasskeyLoginEnhancer() {
         target.className = 'passkey-login-host';
         form.appendChild(target);
       }
-      setHost(target);
+      if (!cancelled) setHost(target);
     };
 
     locate();
-    const observer = new MutationObserver(locate);
-    observer.observe(root, { childList: true, subtree: true });
-    return () => observer.disconnect();
-  }, [host]);
+    for (const delay of [50, 150, 350, 700, 1400]) {
+      timers.push(window.setTimeout(locate, delay));
+    }
+    return () => {
+      cancelled = true;
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, []);
 
-  if (!host || !passkeysSupported()) return null;
+  if (!host || !host.isConnected || !passkeysSupported()) return null;
   const mobile = Boolean(host.closest('.m-login-card'));
 
   const login = async () => {
