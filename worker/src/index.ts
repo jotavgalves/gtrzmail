@@ -1,13 +1,19 @@
 import type { AppEnv } from './env';
 import {
-  changePassword,
-  getSessionUser,
   listSessionAccounts,
   login,
   logout,
   sessionResponse,
   switchAccount
 } from './auth';
+import {
+  changePasswordHardened,
+  getSessionUserHardened,
+  listUserSessions,
+  revokeOtherSessions,
+  revokeUserSession
+} from './account-security';
+import { downloadAttachmentHardened } from './attachment-security';
 import {
   addMailbox,
   createAccount,
@@ -34,7 +40,6 @@ import {
 } from './key-rotation';
 import { messageStats } from './mail';
 import {
-  downloadAttachmentRich,
   saveDraftRich,
   sendMessageRich
 } from './mail-rich';
@@ -82,13 +87,17 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   if (path === '/api/auth/logout' && request.method === 'POST') return logout(request, env);
   if (path === '/api/session' && request.method === 'GET') return sessionResponse(request, env);
 
-  const user = await getSessionUser(request, env);
+  const user = await getSessionUserHardened(request, env);
   if (!user) return json({ error: 'Sessão expirada.' }, 401);
 
   if (path === '/api/bootstrap' && request.method === 'GET') return bootstrapApp(request, env, user);
   if (path === '/api/auth/accounts' && request.method === 'GET') return listSessionAccounts(request, env, user);
   if (path === '/api/auth/switch-account' && request.method === 'POST') return switchAccount(request, env, user);
-  if (path === '/api/account/password' && request.method === 'POST') return changePassword(request, env, user);
+  if (path === '/api/account/password' && request.method === 'POST') return changePasswordHardened(request, env, user);
+  if (path === '/api/account/sessions' && request.method === 'GET') return listUserSessions(request, env, user);
+  if (path === '/api/account/sessions/revoke-others' && request.method === 'POST') return revokeOtherSessions(request, env, user);
+  const sessionMatch = path.match(/^\/api\/account\/sessions\/([a-f0-9]{64})$/i);
+  if (sessionMatch && request.method === 'DELETE') return revokeUserSession(request, env, user, sessionMatch[1]);
   if (path === '/api/account/signature' && request.method === 'GET') return getSignature(env, user);
   if (path === '/api/account/signature' && request.method === 'POST') return updateSignature(request, env, user);
 
@@ -133,7 +142,7 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
     return updateMessageActionRich(env, user, actionMatch[1], actionMatch[2] as 'read' | 'star' | 'trash' | 'archive' | 'restore' | 'delete', value);
   }
   const attachmentMatch = path.match(/^\/api\/attachments\/([0-9a-f-]+)$/i);
-  if (attachmentMatch && request.method === 'GET') return downloadAttachmentRich(request, env, user, attachmentMatch[1]);
+  if (attachmentMatch && request.method === 'GET') return downloadAttachmentHardened(request, env, user, attachmentMatch[1]);
   return json({ error: 'Rota não encontrada.' }, 404);
 }
 
