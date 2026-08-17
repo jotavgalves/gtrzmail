@@ -21,7 +21,7 @@
     "secret:rotate-master-key": "node scripts/rotate-master-key.mjs"
   },
   "dependencies": {
-    "@simplewebauthn/browser": "13.3.2",
+    "@simplewebauthn/browser": "13.3.0",
     "@simplewebauthn/server": "13.3.2",
     "lucide-react": "1.28.0",
     "postal-mime": "2.7.5",
