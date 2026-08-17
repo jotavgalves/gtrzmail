@@ -17,7 +17,7 @@ import {
 } from './admin';
 import { listRecentContacts } from './contacts';
 import { assertSameOrigin, json, readJson, withSecurityHeaders } from './http';
-import { messageStats, receiveEmail } from './mail';
+import { messageStats } from './mail';
 import {
   downloadAttachmentRich,
   saveDraftRich,
@@ -26,6 +26,7 @@ import {
 import { updateMessageActionRich } from './message-actions-rich';
 import { getSignature, updateSignature } from './profile';
 import { pushPublicKey, subscribePush, unsubscribePush } from './push';
+import { receiveEmailFast } from './receive-fast';
 import {
   getThreadedMessage,
   handleThreadedResendWebhook,
@@ -145,7 +146,7 @@ export default {
 
   async email(message, env, ctx): Promise<void> {
     try {
-      await receiveEmail(message, env);
+      await receiveEmailFast(message, env);
       ctx.waitUntil(
         notifyLatestInbound(env, message.to, message.from).catch((error) => {
           console.error(JSON.stringify({
