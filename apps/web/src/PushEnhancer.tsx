@@ -3,11 +3,6 @@ import { BellRing, LoaderCircle } from 'lucide-react';
 import { mailApi } from './api';
 import { enableWebPush, pushSupported, syncExistingPushSubscription } from './push';
 
-function notificationButton(): HTMLButtonElement | null {
-  return Array.from(document.querySelectorAll<HTMLButtonElement>('.settings-section button'))
-    .find((button) => button.textContent?.toLowerCase().includes('ativar notificações')) || null;
-}
-
 function inboxButton(): HTMLButtonElement | null {
   return Array.from(document.querySelectorAll<HTMLButtonElement>('.nav-list button'))
     .find((button) => button.textContent?.toLowerCase().includes('entrada')) || null;
@@ -98,33 +93,13 @@ export default function PushEnhancer() {
   }, []);
 
   useEffect(() => {
-    const decorate = () => {
-      const button = notificationButton();
-      if (!button) return false;
-      button.setAttribute('data-web-push', '1');
-      button.title = 'Ativar notificações mesmo com o GTRZ Mail fechado';
-      return true;
-    };
-
-    if (!decorate()) {
-      const root = document.getElementById('root') || document.body;
-      const observer = new MutationObserver(() => {
-        if (decorate()) observer.disconnect();
-      });
-      observer.observe(root, { childList: true, subtree: true });
-      const timeout = window.setTimeout(() => observer.disconnect(), 15_000);
-      return () => {
-        observer.disconnect();
-        window.clearTimeout(timeout);
-      };
-    }
-  }, []);
-
-  useEffect(() => {
     const click = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
-      const button = target?.closest<HTMLButtonElement>('button[data-web-push="1"]');
-      if (!button) return;
+      const button = target?.closest<HTMLButtonElement>('.settings-section button');
+      const isNotificationButton = button?.textContent?.toLowerCase().includes('ativar notificações');
+      if (!button || !isNotificationButton) return;
+
+      button.title = 'Ativar notificações mesmo com o GTRZ Mail fechado';
       event.preventDefault();
       event.stopPropagation();
       if (working) return;
