@@ -40,6 +40,7 @@ import {
 import { loginHardened } from './login-security';
 import { messageStats } from './mail';
 import { saveDraftRich } from './mail-rich';
+import { runSecurityMaintenance } from './maintenance';
 import { updateMessageActionRich } from './message-actions-rich';
 import {
   deletePasskey,
@@ -206,5 +207,8 @@ export default {
       console.error(JSON.stringify({ level: 'error', event: 'email.receive.failed', from: message.from, to: message.to, size: message.rawSize, message: error instanceof Error ? error.message : 'Unknown error' }));
       message.setReject('GTRZ Mail temporary processing error');
     }
+  },
+  async scheduled(_controller, env, ctx): Promise<void> {
+    ctx.waitUntil(runSecurityMaintenance(env));
   }
 } satisfies ExportedHandler<AppEnv>;
