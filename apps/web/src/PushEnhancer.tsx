@@ -50,13 +50,16 @@ export default function PushEnhancer() {
 
   useEffect(() => {
     if (!pushSupported()) return;
-    const sync = () => {
-      if (!document.querySelector('.app-shell')) return;
+    let finished = false;
+    const trySync = () => {
+      if (finished || !document.querySelector('.app-shell')) return;
+      finished = true;
+      observer.disconnect();
       void syncExistingPushSubscription().catch(() => undefined);
     };
-    sync();
-    const observer = new MutationObserver(sync);
+    const observer = new MutationObserver(trySync);
     observer.observe(document.body, { childList: true, subtree: true });
+    trySync();
     return () => observer.disconnect();
   }, []);
 
