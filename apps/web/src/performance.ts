@@ -3,6 +3,7 @@ import {
   mailApi,
   type FolderStats,
   type Mailbox,
+  type MessageDetail,
   type MessageFilters,
   type MessageSummary,
   type User
@@ -19,6 +20,9 @@ type BootstrapPayload = {
 
 const inflight = new Map<string, Promise<unknown>>();
 const microcache = new Map<string, TimedValue<unknown>>();
+const installedAt = Date.now();
+let lastMessageTapAt = 0;
+let initialMobileAutoOpenSuppressed = false;
 
 function cachedCall<T>(key: string, ttlMs: number, producer: () => Promise<T>): Promise<T> {
   const now = Date.now();
@@ -43,6 +47,39 @@ function cachedCall<T>(key: string, ttlMs: number, producer: () => Promise<T>): 
 
 function filterKey(filters: MessageFilters): string {
   return `${filters.starred ? 1 : 0}${filters.unread ? 1 : 0}${filters.hasAttachment ? 1 : 0}`;
+}
+
+function cachedSummary(id: string): MessageSummary | null {
+  for (const [key, entry] of microcache.entries()) {
+    if (!key.startsWith('list:') || entry.expiresAt <= Date.now()) continue;
+    const value = entry.value as { messages?: MessageSummary[] };
+    const found = value.messages?.find((message) => message.id === id);
+    if (found) return found;
+  }
+  return null;
+}
+
+function lightweightDetail(summary: MessageSummary): MessageDetail {
+  return {
+    ...summary,
+    cc: [],
+    bcc: [],
+    bodyText: '',
+    bodyHtml: null,
+    messageId: null,
+    inReplyTo: null,
+    references: [],
+    attachments: []
+  };
+}
+
+function shouldSuppressInitialMobileOpen(): boolean {
+  if (initialMobileAutoOpenSuppressed) return false;
+  if (!window.matchMedia('(max-width: 820px)').matches) return false;
+  if (Date.now() - installedAt > 7000) return false;
+  if (Date.now() - lastMessageTapAt < 1000) return false;
+  if (new URL(window.location.href).searchParams.has('message')) return false;
+  return true;
 }
 
 export function clearPerformanceReadCache(): void {
@@ -86,21 +123,30 @@ export function installPerformanceTuning(): void {
   const originalSend = mailApi.send;
   const originalDraft = mailApi.saveDraft;
 
-  // One request hydrates session + inbox + counters. The App's immediately
-  // following list/stats calls are served from memory rather than the network.
   mailApi.session = () => cachedCall('session', 5000, () => bootstrapSession(originalSession));
-
-  // The app currently polls every 15s. A short in-memory cache means alternate
-  // poll cycles are free while explicit refreshes and data mutations invalidate it.
-  // Nothing is persisted to localStorage/IndexedDB.
   mailApi.stats = () => cachedCall('stats', 20000, originalStats);
   mailApi.list = (folder: string, query = '', filters: MessageFilters = {}) =>
     cachedCall(`list:${folder}:${query}:${filterKey(filters)}`, 20000, () => originalList(folder, query, filters));
-  mailApi.get = (id: string) => cachedCall(`message:${id}`, 60000, async () => {
-    const result = await originalGet(id);
-    microcache.delete('stats');
-    return result;
-  });
+
+  mailApi.get = (id: string) => {
+    // App.tsx historically auto-selects the first row after boot. On mobile that
+    // caused an unnecessary R2 decrypt/MIME parse before the user touched a mail.
+    if (shouldSuppressInitialMobileOpen()) {
+      const summary = cachedSummary(id);
+      if (summary) {
+        initialMobileAutoOpenSuppressed = true;
+        queueMicrotask(() => document.querySelector<HTMLButtonElement>('.reader-back')?.click());
+        return Promise.resolve({ message: lightweightDetail(summary) });
+      }
+    }
+
+    return cachedCall(`message:${id}`, 60000, async () => {
+      const result = await originalGet(id);
+      microcache.delete('stats');
+      return result;
+    });
+  };
+
   mailApi.thread = (threadId: string) => cachedCall(`thread:${threadId}`, 15000, () => originalThread(threadId));
 
   mailApi.action = async (...args: Parameters<typeof originalAction>) => {
@@ -121,6 +167,11 @@ export function installPerformanceTuning(): void {
     clearPerformanceReadCache();
     return result;
   };
+
+  document.addEventListener('pointerdown', (event) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('.message-row')) lastMessageTapAt = Date.now();
+  }, true);
 
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement | null;
