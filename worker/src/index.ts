@@ -57,6 +57,7 @@ import {
 import { getSignature, updateSignature } from './profile';
 import { pushPublicKey, subscribePush, unsubscribePush } from './push';
 import { receiveEmailFast } from './receive-fast';
+import { listAdminSecurityEvents, listSecurityEvents } from './security-events';
 import {
   getThreadedMessage,
   handleThreadedResendWebhook,
@@ -102,6 +103,7 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   if (path === '/api/auth/switch-account' && request.method === 'POST') return switchAccount(request, env, user);
 
   if (path === '/api/account/security' && request.method === 'GET') return securityStatus(request, env, user);
+  if (path === '/api/account/security-events' && request.method === 'GET') return listSecurityEvents(env, user);
   if (path === '/api/account/reauth/password' && request.method === 'POST') return passwordStepUp(request, env, user);
   if (path === '/api/account/reauth/passkey/options' && request.method === 'POST') return stepUpOptions(env, user);
   if (path === '/api/account/reauth/passkey/verify' && request.method === 'POST') return verifyStepUp(request, env, user);
@@ -126,6 +128,10 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   if (path === '/api/admin/accounts' && request.method === 'GET') {
     const denied = await requireRecentStepUp(request, env, user);
     return denied || listAccounts(env, user);
+  }
+  if (path === '/api/admin/security-events' && request.method === 'GET') {
+    const denied = await requireRecentStepUp(request, env, user);
+    return denied || listAdminSecurityEvents(env, user);
   }
   if (path === '/api/admin/accounts' && request.method === 'POST') {
     const denied = await requireRecentStepUp(request, env, user);
