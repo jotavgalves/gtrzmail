@@ -28,6 +28,7 @@ import {
   sendMessage,
   updateMessageAction
 } from './mail';
+import { getSignature, updateSignature } from './profile';
 
 async function api(request: Request, env: AppEnv): Promise<Response> {
   const url = new URL(request.url);
@@ -66,6 +67,8 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   if (path === '/api/auth/accounts' && request.method === 'GET') return listSessionAccounts(request, env, user);
   if (path === '/api/auth/switch-account' && request.method === 'POST') return switchAccount(request, env, user);
   if (path === '/api/account/password' && request.method === 'POST') return changePassword(request, env, user);
+  if (path === '/api/account/signature' && request.method === 'GET') return getSignature(env, user);
+  if (path === '/api/account/signature' && request.method === 'POST') return updateSignature(request, env, user);
 
   if (path === '/api/admin/accounts' && request.method === 'GET') return listAccounts(env, user);
   if (path === '/api/admin/accounts' && request.method === 'POST') return createAccount(request, env, user);
@@ -106,7 +109,7 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   }
 
   const attachmentMatch = path.match(/^\/api\/attachments\/([0-9a-f-]+)$/i);
-  if (attachmentMatch && request.method === 'GET') return downloadAttachment(env, user, attachmentMatch[1]);
+  if (attachmentMatch && request.method === 'GET') return downloadAttachment(request, env, user, attachmentMatch[1]);
 
   return json({ error: 'Rota não encontrada.' }, 404);
 }
