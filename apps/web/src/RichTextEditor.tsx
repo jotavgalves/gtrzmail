@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react';
 import {
   AlignCenter,
   AlignLeft,
@@ -171,7 +171,7 @@ export default function RichTextEditor({
     await addImageFile(image);
   };
 
-  const toolbarMouseDown = (event: React.MouseEvent) => event.preventDefault();
+  const toolbarMouseDown = (event: ReactMouseEvent) => event.preventDefault();
 
   return (
     <div className={`rich-editor ${compact ? 'compact' : ''}`}>
