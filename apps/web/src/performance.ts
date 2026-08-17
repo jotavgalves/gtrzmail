@@ -30,9 +30,9 @@ function filterKey(filters: MessageFilters): string {
   return `${filters.starred ? 1 : 0}${filters.unread ? 1 : 0}${filters.hasAttachment ? 1 : 0}`;
 }
 
-function clearDynamicReadCache() {
+export function clearPerformanceReadCache(): void {
   for (const key of microcache.keys()) {
-    if (key.startsWith('list:') || key === 'stats') microcache.delete(key);
+    if (key.startsWith('list:') || key === 'stats' || key.startsWith('thread:')) microcache.delete(key);
   }
 }
 
@@ -46,29 +46,44 @@ export function installPerformanceTuning(): void {
   const originalSend = mailApi.send;
   const originalDraft = mailApi.saveDraft;
 
-  mailApi.session = () => cachedCall('session', 1500, originalSession);
-  mailApi.stats = () => cachedCall('stats', 1200, originalStats);
+  // The app currently polls every 15s. A short in-memory cache means alternate
+  // poll cycles are free while explicit refreshes and data mutations invalidate it.
+  // Nothing is persisted to localStorage/IndexedDB.
+  mailApi.session = () => cachedCall('session', 5000, originalSession);
+  mailApi.stats = () => cachedCall('stats', 20000, originalStats);
   mailApi.list = (folder: string, query = '', filters: MessageFilters = {}) =>
-    cachedCall(`list:${folder}:${query}:${filterKey(filters)}`, 1200, () => originalList(folder, query, filters));
-  mailApi.get = (id: string) => cachedCall(`message:${id}`, 3000, () => originalGet(id));
-  mailApi.thread = (threadId: string) => cachedCall(`thread:${threadId}`, 2500, () => originalThread(threadId));
+    cachedCall(`list:${folder}:${query}:${filterKey(filters)}`, 20000, () => originalList(folder, query, filters));
+  mailApi.get = (id: string) => cachedCall(`message:${id}`, 60000, async () => {
+    const result = await originalGet(id);
+    // Opening a message can mark it read on the server.
+    microcache.delete('stats');
+    return result;
+  });
+  mailApi.thread = (threadId: string) => cachedCall(`thread:${threadId}`, 15000, () => originalThread(threadId));
 
   mailApi.action = async (...args: Parameters<typeof originalAction>) => {
     const result = await originalAction(...args);
-    clearDynamicReadCache();
+    clearPerformanceReadCache();
     microcache.delete(`message:${args[0]}`);
     return result;
   };
 
   mailApi.send = async (...args: Parameters<typeof originalSend>) => {
     const result = await originalSend(...args);
-    clearDynamicReadCache();
+    clearPerformanceReadCache();
     return result;
   };
 
   mailApi.saveDraft = async (...args: Parameters<typeof originalDraft>) => {
     const result = await originalDraft(...args);
-    clearDynamicReadCache();
+    clearPerformanceReadCache();
     return result;
   };
+
+  // Manual refresh must always bypass the microcache.
+  document.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('[aria-label="Atualizar"]')) clearPerformanceReadCache();
+  }, true);
+  window.addEventListener('gtrz-force-refresh', clearPerformanceReadCache);
 }
