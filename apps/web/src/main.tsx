@@ -13,6 +13,7 @@ import './mobile-account.css';
 import './mobile-native.css';
 import './mobile-compose-fixes.css';
 import './contacts.css';
+import './contacts-visibility.css';
 
 const MobileApp = lazy(() => import('./MobileApp'));
 const MobileUXFixes = lazy(() => import('./MobileUXFixes'));
