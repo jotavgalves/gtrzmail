@@ -55,6 +55,13 @@ export type MessageFilters = {
 
 export type FolderStats = Record<string, { total: number; unread: number }>;
 
+export type RecentContact = {
+  address: string;
+  name: string | null;
+  count: number;
+  lastUsedAt: number;
+};
+
 export type AdminMailbox = {
   id: string;
   address: string;
@@ -105,6 +112,7 @@ export const mailApi = {
     method: 'POST',
     body: JSON.stringify({ currentPassword, newPassword })
   }),
+  contacts: () => apiFetch<{ contacts: RecentContact[] }>('/api/contacts'),
   list: (folder: string, query = '', filters: MessageFilters = {}) => {
     const params = new URLSearchParams({ folder, q: query });
     if (filters.starred) params.set('starred', '1');
