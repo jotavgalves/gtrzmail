@@ -9,6 +9,7 @@ export type InlineHtmlImage = {
 
 const DATA_IMAGE_RE = /^data:image\/(png|jpeg|gif|webp);base64,([A-Za-z0-9+/=\r\n]+)$/i;
 const CID_RE = /^[A-Za-z0-9._@-]{1,127}$/;
+const REMOTE_URL_RE = /^(?:https?:)?\/\//i;
 
 const allowedStyles: NonNullable<IOptions['allowedStyles']> = {
   '*': {
@@ -45,7 +46,11 @@ const allowedStyles: NonNullable<IOptions['allowedStyles']> = {
   }
 };
 
-function options(allowDataImages: boolean, transformInlineImages?: (mimeType: string, base64: string) => string): IOptions {
+function options(
+  allowDataImages: boolean,
+  transformInlineImages?: (mimeType: string, base64: string) => string,
+  allowRemoteImages = false
+): IOptions {
   return {
     allowedTags: [
       'p', 'div', 'span', 'br', 'strong', 'b', 'em', 'i', 'u', 's', 'strike',
@@ -55,7 +60,7 @@ function options(allowDataImages: boolean, transformInlineImages?: (mimeType: st
     allowedAttributes: {
       '*': ['style'],
       a: ['href', 'title', 'target', 'rel'],
-      img: ['src', 'alt', 'title', 'width', 'height'],
+      img: ['src', 'alt', 'title', 'width', 'height', 'data-gtrz-remote-blocked'],
       table: ['width', 'border', 'cellpadding', 'cellspacing', 'align'],
       td: ['width', 'height', 'colspan', 'rowspan', 'align', 'valign'],
       th: ['width', 'height', 'colspan', 'rowspan', 'align', 'valign'],
@@ -65,7 +70,11 @@ function options(allowDataImages: boolean, transformInlineImages?: (mimeType: st
     allowedSchemes: ['http', 'https', 'mailto', 'cid', ...(allowDataImages ? ['data'] : [])],
     allowedSchemesByTag: {
       a: ['http', 'https', 'mailto'],
-      img: ['http', 'https', 'cid', ...(allowDataImages ? ['data'] : [])]
+      img: [
+        'cid',
+        ...(allowDataImages ? ['data'] : []),
+        ...(allowRemoteImages ? ['http', 'https'] : [])
+      ]
     },
     allowedStyles,
     allowProtocolRelative: false,
@@ -86,7 +95,7 @@ function options(allowDataImages: boolean, transformInlineImages?: (mimeType: st
         if (dataMatch) {
           if (!allowDataImages) {
             const { src: _ignored, ...rest } = attribs;
-            return { tagName: 'img', attribs: rest };
+            return { tagName: 'img', attribs: { ...rest, alt: attribs.alt || 'Imagem bloqueada' } };
           }
           if (transformInlineImages) {
             const mimeType = `image/${dataMatch[1].toLowerCase() === 'jpeg' ? 'jpeg' : dataMatch[1].toLowerCase()}`;
@@ -100,21 +109,41 @@ function options(allowDataImages: boolean, transformInlineImages?: (mimeType: st
           const cid = src.slice(4);
           if (!CID_RE.test(cid)) {
             const { src: _ignored, ...rest } = attribs;
-            return { tagName: 'img', attribs: rest };
+            return { tagName: 'img', attribs: { ...rest, alt: attribs.alt || 'Imagem bloqueada' } };
           }
+          return { tagName: 'img', attribs };
         }
+
+        if (src && REMOTE_URL_RE.test(src) && !allowRemoteImages) {
+          const { src: _ignored, ...rest } = attribs;
+          return {
+            tagName: 'img',
+            attribs: {
+              ...rest,
+              alt: attribs.alt || 'Imagem externa bloqueada',
+              'data-gtrz-remote-blocked': '1'
+            }
+          };
+        }
+
+        // Unknown or relative image sources are removed from displayed inbound mail.
+        if (src && !allowRemoteImages) {
+          const { src: _ignored, ...rest } = attribs;
+          return { tagName: 'img', attribs: { ...rest, alt: attribs.alt || 'Imagem bloqueada' } };
+        }
+
         return { tagName: 'img', attribs };
       }
     }
   };
 }
 
-export function sanitizeEmailHtml(input: string, allowDataImages = false): string {
-  return sanitizeHtml(input.slice(0, 8_000_000), options(allowDataImages));
+export function sanitizeEmailHtml(input: string, allowDataImages = false, allowRemoteImages = false): string {
+  return sanitizeHtml(input.slice(0, 8_000_000), options(allowDataImages, undefined, allowRemoteImages));
 }
 
 export function sanitizeSignatureHtml(input: string): string {
-  const signatureOptions = options(false);
+  const signatureOptions = options(false, undefined, false);
   return sanitizeHtml(input.slice(0, 100_000), {
     ...signatureOptions,
     allowedTags: (signatureOptions.allowedTags || []).filter((tag) => tag !== 'img')
@@ -135,7 +164,7 @@ export function prepareOutboundHtml(input: string): { html: string; inlineImages
         contentId
       });
       return contentId;
-    })
+    }, true)
   );
   return { html, inlineImages };
 }
