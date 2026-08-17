@@ -1,5 +1,13 @@
 import type { AppEnv } from './env';
-import { changePassword, getSessionUser, login, logout, sessionResponse } from './auth';
+import {
+  changePassword,
+  getSessionUser,
+  listSessionAccounts,
+  login,
+  logout,
+  sessionResponse,
+  switchAccount
+} from './auth';
 import {
   addMailbox,
   createAccount,
@@ -55,6 +63,8 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   const user = await getSessionUser(request, env);
   if (!user) return json({ error: 'Sessão expirada.' }, 401);
 
+  if (path === '/api/auth/accounts' && request.method === 'GET') return listSessionAccounts(request, env, user);
+  if (path === '/api/auth/switch-account' && request.method === 'POST') return switchAccount(request, env, user);
   if (path === '/api/account/password' && request.method === 'POST') return changePassword(request, env, user);
 
   if (path === '/api/admin/accounts' && request.method === 'GET') return listAccounts(env, user);
