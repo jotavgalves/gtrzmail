@@ -3,7 +3,8 @@ import type { Mailbox, MessageDetail, MessageSummary, User } from './api';
 export const demoUser: User = {
   id: 'demo-user',
   email: 'joao@gtrz.com.br',
-  displayName: 'João Victor'
+  displayName: 'João Victor',
+  isAdmin: true
 };
 
 export const demoMailboxes: Mailbox[] = [
@@ -45,13 +46,15 @@ export const demoMessages: MessageSummary[] = [
   }
 ];
 
+const thread = { messageId: null, inReplyTo: null, references: [] as string[] };
+
 export const demoDetails: Record<string, MessageDetail> = {
   'demo-1': {
-    ...demoMessages[0], cc: [], bcc: [],
+    ...demoMessages[0], ...thread, cc: [], bcc: [],
     bodyText: `Bom dia, João.\n\nSegue o orçamento atualizado para a produção dos painéis e materiais do próximo evento.\n\nConseguimos manter o prazo combinado para amanhã. Estou anexando o PDF com os valores, medidas e especificações de cada peça.\n\nQualquer ajuste me avise.\n\nAna\nArmazém da Estampa`,
     attachments: [{ id: 'att-demo-1', filename: 'orcamento_gtrz_140826.pdf', mimeType: 'application/pdf', sizeBytes: 2867200, contentId: null, disposition: 'attachment' }]
   },
-  'demo-2': { ...demoMessages[1], cc: [], bcc: [], bodyText: 'Uma nova venda foi confirmada para La Rumba. Acesse o painel do evento para conferir os detalhes.', attachments: [] },
-  'demo-3': { ...demoMessages[2], cc: [], bcc: [], bodyText: 'Hola, João.\n\nTe envío la lista final para el evento del sábado. Quedaron confirmadas las personas de la mesa reservada.\n\nNos vemos allá.', attachments: [{ id: 'att-demo-3', filename: 'lista_invitados.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', sizeBytes: 92032, contentId: null, disposition: 'attachment' }] },
-  'demo-4': { ...demoMessages[3], cc: [], bcc: [], bodyText: 'Your Email Routing configuration is active and processing messages for gtrz.com.br.', attachments: [] }
+  'demo-2': { ...demoMessages[1], ...thread, cc: [], bcc: [], bodyText: 'Uma nova venda foi confirmada para La Rumba. Acesse o painel do evento para conferir os detalhes.', attachments: [] },
+  'demo-3': { ...demoMessages[2], ...thread, cc: [], bcc: [], bodyText: 'Hola, João.\n\nTe envío la lista final para el evento del sábado. Quedaron confirmadas las personas de la mesa reservada.\n\nNos vemos allá.', attachments: [{ id: 'att-demo-3', filename: 'lista_invitados.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', sizeBytes: 92032, contentId: null, disposition: 'attachment' }] },
+  'demo-4': { ...demoMessages[3], ...thread, cc: [], bcc: [], bodyText: 'Your Email Routing configuration is active and processing messages for gtrz.com.br.', attachments: [] }
 };
