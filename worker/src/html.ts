@@ -114,7 +114,11 @@ export function sanitizeEmailHtml(input: string, allowDataImages = false): strin
 }
 
 export function sanitizeSignatureHtml(input: string): string {
-  return sanitizeHtml(input.slice(0, 100_000), options(false));
+  const signatureOptions = options(false);
+  return sanitizeHtml(input.slice(0, 100_000), {
+    ...signatureOptions,
+    allowedTags: (signatureOptions.allowedTags || []).filter((tag) => tag !== 'img')
+  });
 }
 
 export function prepareOutboundHtml(input: string): { html: string; inlineImages: InlineHtmlImage[] } {
