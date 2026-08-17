@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { AddressBook, Mail, Pencil, Phone, Plus, Save, Search, Star, Trash2, X } from 'lucide-react';
+import { Mail, Pencil, Phone, Plus, Save, Search, Star, Trash2, Users, X } from 'lucide-react';
 
 type ContactEmail = { id?: string; email: string; label: string; isPrimary: boolean };
 type SavedContact = {
@@ -276,7 +276,7 @@ export default function ContactsIntegration() {
   } : undefined;
 
   return <>
-    <button className="contacts-launcher" onClick={() => setOpen(true)} aria-label="Contatos"><AddressBook size={19} /><span>Contatos</span></button>
+    <button className="contacts-launcher" onClick={() => setOpen(true)} aria-label="Contatos"><Users size={19} /><span>Contatos</span></button>
 
     {suggestions.length > 0 && activeInput && suggestionRect && <div className="contact-suggestions" style={suggestionStyle} role="listbox">
       {suggestions.map((suggestion, index) => <button
@@ -299,7 +299,7 @@ export default function ContactsIntegration() {
     {open && <div className="contacts-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setOpen(false)}>
       <section className="contacts-book" role="dialog" aria-modal="true" aria-label="Contatos">
         <header className="contacts-header">
-          <div><AddressBook size={20} /><span><strong>Contatos</strong><small>{contacts.length} salvo{contacts.length === 1 ? '' : 's'}</small></span></div>
+          <div><Users size={20} /><span><strong>Contatos</strong><small>{contacts.length} salvo{contacts.length === 1 ? '' : 's'}</small></span></div>
           <div><button className="contacts-add" onClick={() => setDraft(blankDraft())}><Plus size={17} /> Novo</button><button className="contacts-icon" onClick={() => setOpen(false)} aria-label="Fechar"><X size={20} /></button></div>
         </header>
 
@@ -308,7 +308,7 @@ export default function ContactsIntegration() {
           {error && <div className="contacts-error">{error}</div>}
           <div className="contacts-scroll">
             {loading && <div className="contacts-empty">Carregando contatos…</div>}
-            {!loading && filtered.length === 0 && <div className="contacts-empty"><AddressBook size={28} /><strong>Nenhum contato salvo</strong><span>Os endereços usados recentemente continuam disponíveis no autocomplete.</span></div>}
+            {!loading && filtered.length === 0 && <div className="contacts-empty"><Users size={28} /><strong>Nenhum contato salvo</strong><span>Os endereços usados recentemente continuam disponíveis no autocomplete.</span></div>}
             {filtered.map((contact) => <article className="contact-card" key={contact.id}>
               <button className={`contact-star ${contact.favorite ? 'active' : ''}`} onClick={() => void toggleFavorite(contact)} aria-label="Favoritar"><Star size={17} fill={contact.favorite ? 'currentColor' : 'none'} /></button>
               <div className="contact-card-main"><strong>{contact.displayName || contact.emails[0]?.email}</strong>{contact.emails.map((email) => <span key={email.id || email.email}><Mail size={13} />{email.email}{email.isPrimary && <b>Principal</b>}</span>)}{contact.phone && <span><Phone size={13} />{contact.phone}</span>}</div>
@@ -329,7 +329,12 @@ export default function ContactsIntegration() {
               <input className="email-address" type="email" value={email.email} onChange={(event) => editEmail(index, { email: event.target.value })} placeholder="email@exemplo.com" required={index === 0} />
               <input className="email-label" value={email.label} onChange={(event) => editEmail(index, { label: event.target.value })} placeholder="Rótulo" />
               <label className="primary-radio" title="Definir como principal"><input type="radio" name="primary-email" checked={email.isPrimary} onChange={() => editEmail(index, { isPrimary: true })} /><span>Principal</span></label>
-              {draft.emails.length > 1 && <button type="button" className="remove-email" onClick={() => setDraft((current) => current ? { ...current, emails: current.emails.filter((_, itemIndex) => itemIndex !== index).map((item, itemIndex) => ({ ...item, isPrimary: item.isPrimary || (itemIndex === 0 && !current.emails.filter((_, i) => i !== index).some((mail) => mail.isPrimary)) })) } : current)}><X size={15} /></button>}
+              {draft.emails.length > 1 && <button type="button" className="remove-email" onClick={() => setDraft((current) => {
+                if (!current) return current;
+                const remaining = current.emails.filter((_, itemIndex) => itemIndex !== index);
+                if (remaining.length && !remaining.some((mail) => mail.isPrimary)) remaining[0] = { ...remaining[0], isPrimary: true };
+                return { ...current, emails: remaining };
+              })}><X size={15} /></button>}
             </div>)}
           </div>
           <label>Observações <small>opcional</small><textarea value={draft.notes} onChange={(event) => setDraft((current) => current ? { ...current, notes: event.target.value } : current)} placeholder="Notas sobre este contato" /></label>
