@@ -6,6 +6,7 @@ const encoder = new TextEncoder();
 const COOKIE_NAME = 'gtrz_session';
 const ACCOUNT_COOKIE_PREFIX = 'gtrz_account_';
 const MAX_PBKDF2_ITERATIONS = 100000;
+const SESSION_HEARTBEAT_SECONDS = 5 * 60;
 
 type UserRow = {
   id: string;
@@ -25,6 +26,7 @@ type SessionRow = {
   display_name: string;
   is_admin: number;
   expires_at: number;
+  last_seen_at: number;
 };
 
 function cookieEntries(request: Request): Map<string, string> {
@@ -66,7 +68,7 @@ function clearCookie(name: string): string {
 async function sessionForToken(env: AppEnv, token: string, now = Math.floor(Date.now() / 1000)): Promise<SessionRow | null> {
   const sessionId = await sha256Hex(token);
   return env.DB.prepare(
-    `SELECT s.id AS session_id, s.user_id, s.expires_at, u.email, u.display_name, u.is_admin
+    `SELECT s.id AS session_id, s.user_id, s.expires_at, s.last_seen_at, u.email, u.display_name, u.is_admin
      FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.id = ? AND s.expires_at > ? AND u.is_active = 1 LIMIT 1`
   ).bind(sessionId, now).first<SessionRow>();
@@ -207,7 +209,11 @@ export async function getSessionUser(request: Request, env: AppEnv): Promise<Ses
   const row = await sessionForToken(env, token, now);
   if (!row) return null;
 
-  await env.DB.prepare('UPDATE sessions SET last_seen_at = ? WHERE id = ?').bind(now, row.session_id).run();
+  // Avoid turning every API read into a D1 write. A five-minute heartbeat is
+  // sufficient for diagnostics while dramatically reducing request latency.
+  if (row.last_seen_at <= now - SESSION_HEARTBEAT_SECONDS) {
+    await env.DB.prepare('UPDATE sessions SET last_seen_at = ? WHERE id = ?').bind(now, row.session_id).run();
+  }
   return sessionUser(row);
 }
 
@@ -256,7 +262,6 @@ export async function switchAccount(request: Request, env: AppEnv, currentUser: 
   } catch {
     return json({ error: 'Dados inválidos.' }, 400);
   }
-
   const userId = payload.userId?.trim() || '';
   if (!userId) return json({ error: 'Informe a conta.' }, 400);
   const token = cookieValue(request, accountCookieName(userId));
