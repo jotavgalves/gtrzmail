@@ -1,7 +1,23 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { CheckCircle2, KeyRound, LoaderCircle, LogIn, MailPlus, PenLine, ShieldCheck, UserPlus, Users } from 'lucide-react';
-import { mailApi, type AdminAccount, type SessionAccount } from './api';
+import { mailApi, type AccountSession, type AdminAccount, type SessionAccount } from './api';
 import RichTextEditor from './RichTextEditor';
+
+function formatSessionDate(timestamp: number): string {
+  return new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+  }).format(new Date(timestamp * 1000));
+}
+
+function deviceLabel(userAgent: string): string {
+  const value = userAgent.toLowerCase();
+  if (value.includes('iphone') || value.includes('ipad')) return 'iPhone / iPad';
+  if (value.includes('android')) return 'Android';
+  if (value.includes('windows')) return 'Windows';
+  if (value.includes('macintosh') || value.includes('mac os')) return 'Mac';
+  if (value.includes('linux')) return 'Linux';
+  return 'Dispositivo';
+}
 
 function AccountSessionsBlock({ onNotice }: { onNotice: (message: string) => void }) {
   const [accounts, setAccounts] = useState<SessionAccount[]>([]);
@@ -106,6 +122,82 @@ function AccountSessionsBlock({ onNotice }: { onNotice: (message: string) => voi
   );
 }
 
+function DeviceSessionsBlock({ onNotice }: { onNotice: (message: string) => void }) {
+  const [sessions, setSessions] = useState<AccountSession[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const result = await mailApi.accountSessions();
+      setSessions(result.sessions);
+      setError('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível carregar as sessões.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { void load(); }, []);
+
+  const revoke = async (session: AccountSession) => {
+    if (session.current) return;
+    setWorking(true);
+    setError('');
+    try {
+      await mailApi.revokeSession(session.id);
+      onNotice('Sessão encerrada.');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível encerrar a sessão.');
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const revokeOthers = async () => {
+    setWorking(true);
+    setError('');
+    try {
+      const result = await mailApi.revokeOtherSessions();
+      onNotice(result.revoked ? `${result.revoked} sessão(ões) encerrada(s).` : 'Não havia outras sessões ativas.');
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível encerrar as outras sessões.');
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <section className="settings-section device-sessions-panel">
+      <h3><ShieldCheck size={15} /> Dispositivos conectados</h3>
+      <p className="settings-hint">Sessões ficam inativas após 12 horas sem uso. Ao trocar sua senha, todas as outras sessões são encerradas e a sessão atual recebe um novo token.</p>
+      {loading ? <div className="settings-loading"><LoaderCircle size={18} className="spin" /> Carregando dispositivos</div> : <>
+        <div className="admin-account-list">
+          {sessions.map((session) => (
+            <article className="admin-account" key={session.id}>
+              <div className="admin-account-head">
+                <div>
+                  <strong>{deviceLabel(session.userAgent)}</strong>
+                  <span>Último uso: {formatSessionDate(session.lastSeenAt)} · expira: {formatSessionDate(session.expiresAt)}</span>
+                </div>
+                <div className="admin-tags">{session.current && <b className="active"><CheckCircle2 size={11} /> Este dispositivo</b>}</div>
+              </div>
+              {!session.current && <div className="admin-actions"><button className="secondary-button" type="button" disabled={working} onClick={() => void revoke(session)}>Encerrar sessão</button></div>}
+            </article>
+          ))}
+        </div>
+        {sessions.some((session) => !session.current) && <button className="secondary-button" type="button" disabled={working} onClick={() => void revokeOthers()}>{working ? <LoaderCircle size={14} className="spin" /> : <ShieldCheck size={14} />} Encerrar todas as outras sessões</button>}
+      </>}
+      {error && <div className="form-error settings-error">{error}</div>}
+    </section>
+  );
+}
+
 export function SignaturePanel({ onNotice }: { onNotice: (message: string) => void }) {
   const [html, setHtml] = useState('');
   const [loading, setLoading] = useState(true);
@@ -180,7 +272,7 @@ export function PasswordPanel({ onNotice }: { onNotice: (message: string) => voi
       setCurrentPassword('');
       setNewPassword('');
       setConfirm('');
-      onNotice('Senha alterada com sucesso.');
+      onNotice('Senha alterada. Outras sessões foram encerradas e este dispositivo recebeu um novo token.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Não foi possível alterar a senha.');
     } finally {
@@ -191,6 +283,7 @@ export function PasswordPanel({ onNotice }: { onNotice: (message: string) => voi
   return (
     <>
       <AccountSessionsBlock onNotice={onNotice} />
+      <DeviceSessionsBlock onNotice={onNotice} />
       <section className="settings-section">
         <h3><KeyRound size={15} /> Alterar senha</h3>
         <form className="settings-form" onSubmit={submit}>
