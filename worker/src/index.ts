@@ -18,16 +18,18 @@ import {
 import { listRecentContacts } from './contacts';
 import { assertSameOrigin, json, readJson, withSecurityHeaders } from './http';
 import {
-  downloadAttachment,
-  getMessage,
   handleResendWebhook,
   listMessages,
   messageStats,
   receiveEmail,
-  saveDraft,
-  sendMessage,
   updateMessageAction
 } from './mail';
+import {
+  downloadAttachmentRich,
+  getMessageRich,
+  saveDraftRich,
+  sendMessageRich
+} from './mail-rich';
 import { getSignature, updateSignature } from './profile';
 
 async function api(request: Request, env: AppEnv): Promise<Response> {
@@ -82,11 +84,11 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   if (path === '/api/contacts' && request.method === 'GET') return listRecentContacts(env, user);
   if (path === '/api/messages' && request.method === 'GET') return listMessages(request, env, user);
   if (path === '/api/messages/stats' && request.method === 'GET') return messageStats(env, user);
-  if (path === '/api/messages/send' && request.method === 'POST') return sendMessage(request, env, user);
-  if (path === '/api/messages/draft' && request.method === 'POST') return saveDraft(request, env, user);
+  if (path === '/api/messages/send' && request.method === 'POST') return sendMessageRich(request, env, user);
+  if (path === '/api/messages/draft' && request.method === 'POST') return saveDraftRich(request, env, user);
 
   const messageMatch = path.match(/^\/api\/messages\/([0-9a-f-]+)$/i);
-  if (messageMatch && request.method === 'GET') return getMessage(env, user, messageMatch[1]);
+  if (messageMatch && request.method === 'GET') return getMessageRich(env, user, messageMatch[1]);
 
   const actionMatch = path.match(/^\/api\/messages\/([0-9a-f-]+)\/(read|star|trash|archive|restore|delete)$/i);
   if (actionMatch && request.method === 'POST') {
@@ -109,7 +111,7 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   }
 
   const attachmentMatch = path.match(/^\/api\/attachments\/([0-9a-f-]+)$/i);
-  if (attachmentMatch && request.method === 'GET') return downloadAttachment(request, env, user, attachmentMatch[1]);
+  if (attachmentMatch && request.method === 'GET') return downloadAttachmentRich(request, env, user, attachmentMatch[1]);
 
   return json({ error: 'Rota não encontrada.' }, 404);
 }
