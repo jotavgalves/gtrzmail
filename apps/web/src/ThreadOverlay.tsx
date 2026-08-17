@@ -1,22 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { mailApi, type MessageDetail } from './api';
+import { mailApi, type MessageDetail, type MessageSummary } from './api';
 import ThreadConversation from './ThreadConversation';
 
 type ThreadState = {
   threadId: string;
-  messages: MessageDetail[];
+  messages: MessageSummary[];
+  initialDetail: MessageDetail;
 };
-
-async function fetchDetail(id: string): Promise<MessageDetail> {
-  const response = await fetch(`/api/messages/${id}`, {
-    credentials: 'same-origin',
-    cache: 'no-store'
-  });
-  const payload = await response.json().catch(() => ({})) as { message?: MessageDetail; error?: string };
-  if (!response.ok || !payload.message) throw new Error(payload.error || 'Não foi possível carregar a conversa.');
-  return payload.message;
-}
 
 export default function ThreadOverlay() {
   const [thread, setThread] = useState<ThreadState | null>(null);
@@ -45,9 +36,11 @@ export default function ThreadOverlay() {
       try {
         const listing = await mailApi.thread(message.threadId);
         if (current !== sequence.current || listing.messages.length <= 1) return;
-        const details = await Promise.all(listing.messages.map((item) => fetchDetail(item.id)));
-        if (current !== sequence.current) return;
-        setThread({ threadId: message.threadId, messages: details });
+        setThread({
+          threadId: message.threadId,
+          messages: listing.messages,
+          initialDetail: message
+        });
       } catch {
         setThread(null);
       }
@@ -83,7 +76,7 @@ export default function ThreadOverlay() {
     const observer = new MutationObserver(() => {
       if (attach()) observer.disconnect();
     });
-    observer.observe(document.body, { childList: true, subtree: true });
+    observer.observe(document.querySelector('#root') || document.body, { childList: true, subtree: true });
     return () => {
       observer.disconnect();
       document.querySelector('.message-detail')?.classList.remove('thread-mode');
@@ -91,5 +84,8 @@ export default function ThreadOverlay() {
   }, [thread]);
 
   if (!thread || !mount) return null;
-  return createPortal(<ThreadConversation messages={thread.messages} />, mount);
+  return createPortal(
+    <ThreadConversation messages={thread.messages} initialDetail={thread.initialDetail} />,
+    mount
+  );
 }
