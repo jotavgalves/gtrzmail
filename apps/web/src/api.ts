@@ -41,6 +41,7 @@ export type MessageDetail = MessageSummary & {
   cc: string[];
   bcc: string[];
   bodyText: string;
+  bodyHtml: string | null;
   messageId: string | null;
   inReplyTo: string | null;
   references: string[];
@@ -120,6 +121,11 @@ export const mailApi = {
   changePassword: (currentPassword: string, newPassword: string) => apiFetch<{ ok: boolean }>('/api/account/password', {
     method: 'POST',
     body: JSON.stringify({ currentPassword, newPassword })
+  }),
+  signature: () => apiFetch<{ html: string }>('/api/account/signature'),
+  updateSignature: (html: string) => apiFetch<{ ok: boolean; html: string }>('/api/account/signature', {
+    method: 'POST',
+    body: JSON.stringify({ html })
   }),
   contacts: () => apiFetch<{ contacts: RecentContact[] }>('/api/contacts'),
   list: (folder: string, query = '', filters: MessageFilters = {}) => {
