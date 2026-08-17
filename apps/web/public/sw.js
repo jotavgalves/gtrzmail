@@ -8,6 +8,10 @@ function isCacheableRequest(request, url) {
     url.pathname !== '/sw.js';
 }
 
+function isImmutableAsset(url) {
+  return url.pathname.startsWith('/assets/');
+}
+
 async function cacheResponse(request, response) {
   if (!response || !response.ok || response.type === 'opaque') return response;
   const cache = await caches.open(CACHE);
@@ -28,6 +32,17 @@ async function revalidate(request) {
 async function cachedFirst(request) {
   const cached = await caches.match(request);
   if (cached) return cached;
+
+  const response = await fetch(request);
+  return cacheResponse(request, response);
+}
+
+async function staleWhileRevalidate(request, event) {
+  const cached = await caches.match(request);
+  if (cached) {
+    event.waitUntil(revalidate(request));
+    return cached;
+  }
 
   const response = await fetch(request);
   return cacheResponse(request, response);
@@ -74,5 +89,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(cachedFirst(request));
+  if (isImmutableAsset(url)) {
+    event.respondWith(cachedFirst(request));
+    return;
+  }
+
+  event.respondWith(staleWhileRevalidate(request, event));
 });
