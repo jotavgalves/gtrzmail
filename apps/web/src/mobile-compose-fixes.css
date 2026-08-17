@@ -1,15 +1,14 @@
 @media (max-width: 820px) {
-  /* The current account is already shown in the sheet header. Do not repeat it. */
+  /* The current account is already identified in the sheet header. */
   .m-account-list > button.current {
     display: none;
   }
 
-  /*
-   * Stable iOS composer viewport.
-   * VisualViewport may change while the keyboard animates, but the composer is
-   * never translated with offsetTop. This avoids the Safari feedback loop that
-   * made contentEditable shake/bounce while typing or dragging.
-   */
+  .m-account-list:not(:has(> button:not(.current))) {
+    display: none;
+  }
+
+  /* Stable iOS composer viewport. */
   .m-compose {
     top: 0 !important;
     bottom: auto !important;
@@ -22,15 +21,90 @@
     -webkit-transform: translateZ(0);
   }
 
-  /* Mobile compose: every important action stays above the writing surface. */
-  .m-compose-header { order: 0; }
-  .m-compose-fields { order: 1; }
+  /* Header stays compact so the keyboard leaves useful writing space. */
+  .m-compose-header {
+    order: 0;
+    min-height: calc(52px + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+  }
 
+  .m-compose-header strong {
+    font-size: 14px;
+  }
+
+  .m-compose-header > div > span {
+    font-size: 9px;
+  }
+
+  .m-compose-fields {
+    order: 1;
+    border-bottom: 0;
+  }
+
+  /* Sender is informational most of the time, so keep it deliberately slim. */
+  .m-compose-row:first-child {
+    min-height: 34px;
+    background: #09090a;
+  }
+
+  .m-compose-row:first-child input,
+  .m-compose-row:first-child select {
+    height: 32px;
+    font-size: 13px;
+    color: #b8b8be;
+  }
+
+  .m-compose-row {
+    min-height: 42px;
+    grid-template-columns: 46px minmax(0, 1fr) auto;
+    padding: 0 12px;
+  }
+
+  .m-compose-row label {
+    font-size: 11px;
+  }
+
+  .m-compose-row input,
+  .m-compose-row select {
+    height: 40px;
+    font-size: 16px; /* prevents iOS input zoom */
+  }
+
+  /* Cc/Cco is always discoverable, but its fields only consume height on demand. */
+  .m-compose-row > button {
+    min-height: 30px;
+    margin-left: 6px;
+    padding: 0 9px;
+    border: 1px solid #29292e;
+    border-radius: 999px;
+    background: #121214;
+    color: #aaaab0;
+    font-size: 10.5px;
+    line-height: 1;
+  }
+
+  .m-compose-row > button:active {
+    background: #1a1a1d;
+    color: #fff;
+  }
+
+  /* When copies are expanded they remain compact. */
+  .m-compose-row:nth-child(3),
+  .m-compose-row:nth-child(4) {
+    min-height: 36px;
+  }
+
+  .m-compose-row:nth-child(3) input,
+  .m-compose-row:nth-child(4) input {
+    height: 34px;
+  }
+
+  /* Important tools live ABOVE the writing area, never underneath the keyboard. */
   .m-compose-bottom {
     order: 2;
-    grid-template-columns: 44px 44px minmax(0, 1fr);
-    min-height: 50px;
-    padding: 4px 10px;
+    grid-template-columns: 42px 42px minmax(0, 1fr);
+    min-height: 44px;
+    padding: 2px 10px;
     border-top: 0;
     border-bottom: 1px solid #202024;
     background: #0b0b0c;
@@ -39,42 +113,70 @@
 
   .m-compose-bottom button,
   .m-compose-bottom label {
-    width: 40px;
-    height: 40px;
+    width: 38px;
+    height: 38px;
+  }
+
+  .m-compose-bottom button.active {
+    background: #1b1b1e;
+    color: #fff;
   }
 
   .m-compose-bottom span {
-    font-size: 11px;
-    color: #85858c;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #77777e;
+    font-size: 10px;
   }
 
+  /* Attachments become a single compact strip instead of a floating bottom box. */
   .m-compose-files {
     position: static;
     order: 3;
-    left: auto;
-    right: auto;
-    bottom: auto;
-    z-index: auto;
+    display: flex;
+    gap: 6px;
     width: auto;
-    max-height: 82px;
-    margin: 6px 10px 0;
+    max-height: 46px;
+    margin: 5px 10px 0;
+    padding: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    border: 1px solid #25252a;
+    border-radius: 11px;
+    background: #111113;
     flex: 0 0 auto;
-    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+
+  .m-compose-files::-webkit-scrollbar {
+    display: none;
+  }
+
+  .m-compose-files > div {
+    display: grid;
+    grid-template-columns: 16px minmax(72px, auto) auto 24px;
+    gap: 5px;
+    align-items: center;
+    min-width: max-content;
+    min-height: 34px;
+    padding: 0 5px;
+    border-radius: 8px;
+    background: #161618;
+    color: #aaaab0;
+    font-size: 9.5px;
   }
 
   .m-compose-error {
     position: static;
     order: 4;
-    left: auto;
-    right: auto;
-    bottom: auto;
-    z-index: auto;
-    margin: 6px 10px 0;
-    padding: 7px 10px;
+    margin: 5px 10px 0;
+    padding: 6px 9px;
     flex: 0 0 auto;
   }
 
-  /* There is exactly one scroll owner while writing: this editor viewport. */
+  /* One scroll owner while typing: the message body itself. */
   .m-editor-zone {
     order: 5;
     flex: 1 1 0;
@@ -89,6 +191,40 @@
     overflow: hidden;
   }
 
+  .m-editor-zone .rich-toolbar {
+    display: none;
+    flex: 0 0 auto;
+    width: 100%;
+    min-height: 42px;
+    padding: 3px 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    flex-wrap: nowrap;
+    border-top: 0;
+    border-bottom: 1px solid #202024;
+    background: #0e0e10;
+    scrollbar-width: none;
+  }
+
+  .m-editor-zone .rich-toolbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .m-compose.formatting-open .m-editor-zone .rich-toolbar {
+    display: flex;
+  }
+
+  .m-editor-zone .rich-toolbar > * {
+    flex: 0 0 auto;
+  }
+
+  .m-editor-zone .rich-toolbar button,
+  .m-editor-zone .rich-color-button,
+  .m-editor-zone .rich-format-select {
+    min-width: 34px;
+    height: 34px;
+  }
+
   .m-editor-zone .rich-editor-surface-wrap {
     flex: 1 1 0;
     min-height: 0;
@@ -99,78 +235,76 @@
     overscroll-behavior-x: none;
     touch-action: pan-y;
     scroll-behavior: auto;
-    scroll-padding-top: 18px;
-    scroll-padding-bottom: 24px;
-  }
-
-  .m-editor-zone .rich-toolbar {
-    border-top: 0;
-    border-bottom: 1px solid #202024;
-    flex: 0 0 auto;
+    scroll-padding-top: 14px;
+    scroll-padding-bottom: 22px;
   }
 
   .m-editor-zone .rich-editor-surface {
     box-sizing: border-box;
     min-height: 100%;
-    padding: 16px 16px 32px;
+    padding: 14px 14px 26px;
     overflow: visible;
     touch-action: pan-y;
     -webkit-user-select: text;
     user-select: text;
     caret-color: #fff;
+    font-size: 16px;
+    line-height: 1.5;
+  }
+
+  .m-editor-zone .rich-editor-placeholder {
+    top: 14px;
+    left: 14px;
+    font-size: 16px;
   }
 
   .m-editor-zone .rich-editor-surface:focus {
     outline: none;
   }
 
-  /* Cc/Bcc are first-class fields, not hidden controls on mobile. */
-  .m-compose-row[data-copy-row],
-  .m-compose-row.copy-row {
-    background: #09090a;
-  }
-
-  /* Avoid iOS input zoom. */
-  .m-compose-row input,
-  .m-compose-row select,
-  .m-editor-zone .rich-editor-surface {
-    font-size: 16px;
-  }
-
-  .m-compose-row {
-    min-height: 44px;
-  }
-
-  .m-compose-row input,
-  .m-compose-row select {
-    height: 42px;
-  }
-
-  /* Keep fields compact once the keyboard takes vertical space. */
+  /* Extra compression only when the keyboard leaves a very short viewport. */
   @media (max-height: 650px) {
     .m-compose-header {
-      min-height: calc(50px + env(safe-area-inset-top));
+      min-height: calc(46px + env(safe-area-inset-top));
+    }
+
+    .m-compose-row:first-child {
+      min-height: 30px;
+    }
+
+    .m-compose-row:first-child input,
+    .m-compose-row:first-child select {
+      height: 28px;
     }
 
     .m-compose-row {
-      min-height: 38px;
+      min-height: 36px;
     }
 
     .m-compose-row input,
     .m-compose-row select {
-      height: 36px;
+      height: 34px;
+    }
+
+    .m-compose-row:nth-child(3),
+    .m-compose-row:nth-child(4) {
+      min-height: 32px;
     }
 
     .m-compose-bottom {
-      min-height: 42px;
-      padding-top: 1px;
-      padding-bottom: 1px;
+      min-height: 38px;
+      padding-top: 0;
+      padding-bottom: 0;
     }
 
     .m-compose-bottom button,
     .m-compose-bottom label {
-      width: 38px;
-      height: 38px;
+      width: 34px;
+      height: 34px;
+    }
+
+    .m-editor-zone .rich-toolbar {
+      min-height: 38px;
     }
   }
 }
