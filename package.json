@@ -15,6 +15,7 @@
     "db:migrate:remote": "wrangler d1 migrations apply gtrz-mail --remote",
     "admin:create": "node scripts/create-admin.mjs",
     "auth:reset-password": "node scripts/reset-password.mjs",
+    "dns:check": "node scripts/check-mail-dns.mjs",
     "secret:master-key": "node scripts/generate-master-key.mjs",
     "secret:rotate-master-key": "node scripts/rotate-master-key.mjs"
   },
