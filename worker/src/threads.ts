@@ -10,6 +10,10 @@ type ThreadRow = {
   received_at: number;
 };
 
+const THREAD_RECONCILE_TTL_MS = 5 * 60 * 1000;
+const reconciledAt = new Map<string, number>();
+const reconciling = new Map<string, Promise<void>>();
+
 function parseReferences(value: string): string[] {
   try {
     const parsed: unknown = JSON.parse(value);
@@ -41,7 +45,7 @@ async function updateThreadIds(env: AppEnv, changes: Array<{ id: string; threadI
   }
 }
 
-export async function ensureUserThreads(env: AppEnv, userId: string): Promise<void> {
+async function reconcileUserThreads(env: AppEnv, userId: string): Promise<void> {
   const result = await env.DB.prepare(
     `SELECT m.id, m.message_id, m.in_reply_to, m.references_json, m.thread_id, m.received_at
      FROM messages m
@@ -118,6 +122,31 @@ export async function ensureUserThreads(env: AppEnv, userId: string): Promise<vo
     .map(({ id, threadId }) => ({ id, threadId }));
 
   if (changes.length) await updateThreadIds(env, changes);
+}
+
+export async function ensureUserThreads(env: AppEnv, userId: string, force = false): Promise<void> {
+  const now = Date.now();
+  const last = reconciledAt.get(userId) || 0;
+  if (!force && now - last < THREAD_RECONCILE_TTL_MS) return;
+
+  const running = reconciling.get(userId);
+  if (running) {
+    await running;
+    if (!force) return;
+  }
+
+  const task = reconcileUserThreads(env, userId);
+  reconciling.set(userId, task);
+  try {
+    await task;
+    reconciledAt.set(userId, Date.now());
+  } finally {
+    if (reconciling.get(userId) === task) reconciling.delete(userId);
+  }
+}
+
+export function invalidateUserThreads(userId: string): void {
+  reconciledAt.delete(userId);
 }
 
 export async function threadMessageIds(env: AppEnv, user: SessionUser, threadId: string): Promise<Response> {
