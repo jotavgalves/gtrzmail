@@ -10,7 +10,9 @@ import './thread-push.css';
 import './ui-fixes.css';
 import './mobile.css';
 import './mobile-account.css';
+import './mobile-native.css';
 
+const MobileApp = lazy(() => import('./MobileApp'));
 const AccountMenuOverlay = lazy(() => import('./AccountMenuOverlay'));
 const PushEnhancer = lazy(() => import('./PushEnhancer'));
 const ThreadListEnhancer = lazy(() => import('./ThreadListEnhancer'));
@@ -26,6 +28,19 @@ if ('serviceWorker' in navigator && !import.meta.env.DEV) {
       .then((registration) => registration.update())
       .catch(() => undefined);
   });
+}
+
+function useMobileViewport() {
+  const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 820px)').matches);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 820px)');
+    const change = () => setMobile(media.matches);
+    media.addEventListener('change', change);
+    return () => media.removeEventListener('change', change);
+  }, []);
+
+  return mobile;
 }
 
 function DeferredEnhancers() {
@@ -59,9 +74,27 @@ function DeferredEnhancers() {
   );
 }
 
+function RootApp() {
+  const mobile = useMobileViewport();
+
+  if (mobile) {
+    return (
+      <Suspense fallback={<main className="m-boot"><img src="/brand/gtrz-symbol.svg" alt="GTRZ" /></main>}>
+        <MobileApp />
+      </Suspense>
+    );
+  }
+
+  return (
+    <>
+      <App />
+      <DeferredEnhancers />
+    </>
+  );
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
-    <DeferredEnhancers />
+    <RootApp />
   </StrictMode>
 );
