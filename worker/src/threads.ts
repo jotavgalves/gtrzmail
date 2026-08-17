@@ -10,7 +10,10 @@ type ThreadRow = {
   received_at: number;
 };
 
-const THREAD_RECONCILE_TTL_MS = 5 * 60 * 1000;
+// Thread reconciliation is maintenance work, not part of the inbox read path.
+// Keep it infrequent and bounded so a cold Worker never scans the whole mailbox.
+const THREAD_RECONCILE_TTL_MS = 30 * 60 * 1000;
+const THREAD_RECONCILE_LIMIT = 1000;
 const reconciledAt = new Map<string, number>();
 const reconciling = new Map<string, Promise<void>>();
 
@@ -55,18 +58,20 @@ async function updateThreadIds(env: AppEnv, changes: Array<{ id: string; threadI
 }
 
 async function reconcileUserThreads(env: AppEnv, userId: string): Promise<void> {
+  // Work only on the recent window. Old thread_id values remain valid and the
+  // visible inbox never waits for this maintenance routine anymore.
   const result = await env.DB.prepare(
     `SELECT m.id, m.message_id, m.in_reply_to, m.references_json, m.thread_id, m.received_at
      FROM messages m
      JOIN mailboxes mb ON mb.id = m.mailbox_id
      WHERE mb.user_id = ?
-     ORDER BY m.received_at ASC
-     LIMIT 5000`
-  ).bind(userId).all<ThreadRow>();
+     ORDER BY m.received_at DESC
+     LIMIT ?`
+  ).bind(userId, THREAD_RECONCILE_LIMIT).all<ThreadRow>();
 
   if (!result.results.length) return;
 
-  const rows = result.results;
+  const rows = [...result.results].sort((a, b) => a.received_at - b.received_at);
   const parent = new Map<string, string>();
   const rank = new Map<string, number>();
   const byMessageId = new Map<string, string>();
@@ -126,7 +131,7 @@ async function reconcileUserThreads(env: AppEnv, userId: string): Promise<void> 
   }
 
   const changes = rows
-    .map((row) => ({ id: row.id, threadId: desired.get(row.id) || row.id, current: row.thread_id }))
+    .map((row) => ({ id: row.id, threadId: desired.get(row.id) || row.thread_id || row.id, current: row.thread_id }))
     .filter((row) => row.current !== row.threadId)
     .map(({ id, threadId }) => ({ id, threadId }));
 
@@ -159,7 +164,7 @@ export function invalidateUserThreads(userId: string): void {
 }
 
 export async function threadMessageIds(env: AppEnv, user: SessionUser, threadId: string): Promise<Response> {
-  await ensureUserThreads(env, user.id);
+  // Critical performance rule: opening a thread never triggers global reconciliation.
   const result = await env.DB.prepare(
     `SELECT m.id, m.folder, m.direction, m.from_name, m.from_address, m.to_json, m.subject, m.preview,
             m.is_read, m.is_starred, m.sent_status, m.received_at,
