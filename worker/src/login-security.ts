@@ -60,8 +60,6 @@ export async function loginHardened(request: Request, env: AppEnv): Promise<Resp
     return json({ error: 'Muitas tentativas. Tente novamente mais tarde.' }, 429);
   }
 
-  // Equalize the most obvious unknown-account timing difference without exposing
-  // whether the address exists. Rate limits are checked first to avoid a free CPU DoS.
   const exists = await env.DB.prepare('SELECT id FROM users WHERE email = ? AND is_active = 1 LIMIT 1')
     .bind(email).first<{ id: string }>();
   if (!exists) await dummyPasswordWork(payload.password || '');
@@ -76,16 +74,6 @@ export async function loginHardened(request: Request, env: AppEnv): Promise<Resp
   }
 
   if (response.status === 401) {
-    await env.DB.batch([
-      env.DB.prepare(
-        `INSERT INTO login_attempts (key, attempts, window_started_at, blocked_until) VALUES (?, 1, ?, 0)
-         ON CONFLICT(key) DO NOTHING`
-      ).bind(emailKey, now),
-      env.DB.prepare(
-        `INSERT INTO login_attempts (key, attempts, window_started_at, blocked_until) VALUES (?, 1, ?, 0)
-         ON CONFLICT(key) DO NOTHING`
-      ).bind(ipKey, now)
-    ]);
     await recordFailure(env, emailKey, EMAIL_FAILURE_LIMIT, now);
     await recordFailure(env, ipKey, IP_FAILURE_LIMIT, now);
   }
