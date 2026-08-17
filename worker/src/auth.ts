@@ -4,6 +4,7 @@ import { json, readJson } from './http';
 
 const encoder = new TextEncoder();
 const COOKIE_NAME = 'gtrz_session';
+const ACCOUNT_COOKIE_PREFIX = 'gtrz_account_';
 const MAX_PBKDF2_ITERATIONS = 100000;
 
 type UserRow = {
@@ -17,13 +18,67 @@ type UserRow = {
   is_admin: number;
 };
 
-function cookieValue(request: Request, name: string): string | null {
+type SessionRow = {
+  session_id: string;
+  user_id: string;
+  email: string;
+  display_name: string;
+  is_admin: number;
+  expires_at: number;
+};
+
+function cookieEntries(request: Request): Map<string, string> {
+  const result = new Map<string, string>();
   const raw = request.headers.get('cookie') || '';
   for (const part of raw.split(';')) {
     const [key, ...rest] = part.trim().split('=');
-    if (key === name) return decodeURIComponent(rest.join('='));
+    if (!key) continue;
+    try {
+      result.set(key, decodeURIComponent(rest.join('=')));
+    } catch {
+      result.set(key, rest.join('='));
+    }
   }
-  return null;
+  return result;
+}
+
+function cookieValue(request: Request, name: string): string | null {
+  return cookieEntries(request).get(name) || null;
+}
+
+function accountCookieName(userId: string): string {
+  return `${ACCOUNT_COOKIE_PREFIX}${userId}`;
+}
+
+function sessionMaxAge(env: AppEnv): number {
+  const days = Math.max(1, Math.min(30, Number(env.SESSION_DAYS || '7')));
+  return days * 86400;
+}
+
+function secureCookie(name: string, value: string, maxAge: number): string {
+  return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${Math.max(0, Math.floor(maxAge))}`;
+}
+
+function clearCookie(name: string): string {
+  return `${name}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;
+}
+
+async function sessionForToken(env: AppEnv, token: string, now = Math.floor(Date.now() / 1000)): Promise<SessionRow | null> {
+  const sessionId = await sha256Hex(token);
+  return env.DB.prepare(
+    `SELECT s.id AS session_id, s.user_id, s.expires_at, u.email, u.display_name, u.is_admin
+     FROM sessions s JOIN users u ON u.id = s.user_id
+     WHERE s.id = ? AND s.expires_at > ? AND u.is_active = 1 LIMIT 1`
+  ).bind(sessionId, now).first<SessionRow>();
+}
+
+function sessionUser(row: SessionRow): SessionUser {
+  return {
+    id: row.user_id,
+    email: row.email,
+    displayName: row.display_name,
+    isAdmin: row.is_admin === 1
+  };
 }
 
 async function verifyPassword(password: string, user: UserRow): Promise<boolean> {
@@ -124,8 +179,7 @@ export async function login(request: Request, env: AppEnv): Promise<Response> {
 
   const token = randomToken(32);
   const sessionId = await sha256Hex(token);
-  const days = Math.max(1, Math.min(30, Number(env.SESSION_DAYS || '7')));
-  const maxAge = days * 86400;
+  const maxAge = sessionMaxAge(env);
   const ipFingerprint = (await sha256Hex(request.headers.get('CF-Connecting-IP') || 'unknown')).slice(0, 24);
 
   await env.DB.prepare(
@@ -135,27 +189,26 @@ export async function login(request: Request, env: AppEnv): Promise<Response> {
   await env.DB.prepare('INSERT INTO audit_logs (id, user_id, action, target_type, target_id, created_at) VALUES (?, ?, ?, ?, ?, ?)')
     .bind(crypto.randomUUID(), user.id, 'auth.login', 'user', user.id, now).run();
 
+  const headers = new Headers();
+  headers.append('set-cookie', secureCookie(COOKIE_NAME, token, maxAge));
+  headers.append('set-cookie', secureCookie(accountCookieName(user.id), token, maxAge));
+
   return json(
     { user: { id: user.id, email: user.email, displayName: user.display_name, isAdmin: user.is_admin === 1 } },
     200,
-    { 'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${maxAge}` }
+    headers
   );
 }
 
 export async function getSessionUser(request: Request, env: AppEnv): Promise<SessionUser | null> {
   const token = cookieValue(request, COOKIE_NAME);
   if (!token) return null;
-  const sessionId = await sha256Hex(token);
   const now = Math.floor(Date.now() / 1000);
-  const row = await env.DB.prepare(
-    `SELECT u.id, u.email, u.display_name, u.is_admin
-     FROM sessions s JOIN users u ON u.id = s.user_id
-     WHERE s.id = ? AND s.expires_at > ? AND u.is_active = 1 LIMIT 1`
-  ).bind(sessionId, now).first<{ id: string; email: string; display_name: string; is_admin: number }>();
+  const row = await sessionForToken(env, token, now);
   if (!row) return null;
 
-  await env.DB.prepare('UPDATE sessions SET last_seen_at = ? WHERE id = ?').bind(now, sessionId).run();
-  return { id: row.id, email: row.email, displayName: row.display_name, isAdmin: row.is_admin === 1 };
+  await env.DB.prepare('UPDATE sessions SET last_seen_at = ? WHERE id = ?').bind(now, row.session_id).run();
+  return sessionUser(row);
 }
 
 export async function sessionResponse(request: Request, env: AppEnv): Promise<Response> {
@@ -164,7 +217,65 @@ export async function sessionResponse(request: Request, env: AppEnv): Promise<Re
   const mailboxes = await env.DB.prepare('SELECT id, address, display_name, is_default FROM mailboxes WHERE user_id = ? ORDER BY is_default DESC, address ASC')
     .bind(user.id)
     .all<{ id: string; address: string; display_name: string; is_default: number }>();
-  return json({ user, mailboxes: mailboxes.results });
+
+  const headers = new Headers();
+  const token = cookieValue(request, COOKIE_NAME);
+  if (token) headers.append('set-cookie', secureCookie(accountCookieName(user.id), token, sessionMaxAge(env)));
+  return json({ user, mailboxes: mailboxes.results }, 200, headers);
+}
+
+export async function listSessionAccounts(request: Request, env: AppEnv, currentUser: SessionUser): Promise<Response> {
+  const now = Math.floor(Date.now() / 1000);
+  const cookies = cookieEntries(request);
+  const accounts = new Map<string, SessionUser>();
+
+  const currentToken = cookies.get(COOKIE_NAME);
+  if (currentToken) {
+    const currentRow = await sessionForToken(env, currentToken, now);
+    if (currentRow) accounts.set(currentRow.user_id, sessionUser(currentRow));
+  }
+
+  for (const [name, token] of cookies.entries()) {
+    if (!name.startsWith(ACCOUNT_COOKIE_PREFIX) || !token) continue;
+    const row = await sessionForToken(env, token, now);
+    if (!row) continue;
+    accounts.set(row.user_id, sessionUser(row));
+  }
+
+  return json({
+    accounts: [...accounts.values()]
+      .map((account) => ({ ...account, current: account.id === currentUser.id }))
+      .sort((a, b) => Number(b.current) - Number(a.current) || a.email.localeCompare(b.email))
+  });
+}
+
+export async function switchAccount(request: Request, env: AppEnv, currentUser: SessionUser): Promise<Response> {
+  let payload: { userId?: string };
+  try {
+    payload = await readJson(request);
+  } catch {
+    return json({ error: 'Dados inválidos.' }, 400);
+  }
+
+  const userId = payload.userId?.trim() || '';
+  if (!userId) return json({ error: 'Informe a conta.' }, 400);
+  const token = cookieValue(request, accountCookieName(userId));
+  if (!token) return json({ error: 'Essa conta ainda não foi autenticada neste navegador.' }, 401);
+
+  const now = Math.floor(Date.now() / 1000);
+  const row = await sessionForToken(env, token, now);
+  if (!row || row.user_id !== userId) return json({ error: 'A sessão dessa conta expirou. Entre novamente.' }, 401);
+
+  await env.DB.prepare('UPDATE sessions SET last_seen_at = ? WHERE id = ?').bind(now, row.session_id).run();
+  await env.DB.prepare('INSERT INTO audit_logs (id, user_id, action, target_type, target_id, created_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(crypto.randomUUID(), currentUser.id, 'auth.account_switched', 'user', row.user_id, now).run();
+
+  const remaining = Math.max(1, row.expires_at - now);
+  return json(
+    { ok: true, user: sessionUser(row) },
+    200,
+    { 'set-cookie': secureCookie(COOKIE_NAME, token, remaining) }
+  );
 }
 
 export async function changePassword(request: Request, env: AppEnv, user: SessionUser): Promise<Response> {
@@ -195,9 +306,16 @@ export async function changePassword(request: Request, env: AppEnv, user: Sessio
 
 export async function logout(request: Request, env: AppEnv): Promise<Response> {
   const token = cookieValue(request, COOKIE_NAME);
+  let userId: string | null = null;
   if (token) {
+    const row = await sessionForToken(env, token);
+    userId = row?.user_id || null;
     const id = await sha256Hex(token);
     await env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(id).run();
   }
-  return json({ ok: true }, 200, { 'set-cookie': `${COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0` });
+
+  const headers = new Headers();
+  headers.append('set-cookie', clearCookie(COOKIE_NAME));
+  if (userId) headers.append('set-cookie', clearCookie(accountCookieName(userId)));
+  return json({ ok: true }, 200, headers);
 }
