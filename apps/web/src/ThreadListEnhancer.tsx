@@ -18,6 +18,9 @@ export default function ThreadListEnhancer() {
   }, []);
 
   useEffect(() => {
+    let frameA = 0;
+    let frameB = 0;
+
     const decorate = () => {
       const rows = Array.from(document.querySelectorAll<HTMLElement>('.message-list .message-row'));
       rows.forEach((row, index) => {
@@ -39,14 +42,20 @@ export default function ThreadListEnhancer() {
       });
     };
 
-    const schedule = () => window.requestAnimationFrame(decorate);
+    const schedule = () => {
+      if (frameA) cancelAnimationFrame(frameA);
+      if (frameB) cancelAnimationFrame(frameB);
+      frameA = requestAnimationFrame(() => {
+        frameB = requestAnimationFrame(decorate);
+      });
+    };
+
     window.addEventListener('gtrz-thread-list-updated', schedule);
-    const observer = new MutationObserver(schedule);
-    observer.observe(document.body, { childList: true, subtree: true });
     schedule();
     return () => {
-      observer.disconnect();
       window.removeEventListener('gtrz-thread-list-updated', schedule);
+      if (frameA) cancelAnimationFrame(frameA);
+      if (frameB) cancelAnimationFrame(frameB);
     };
   }, []);
 
