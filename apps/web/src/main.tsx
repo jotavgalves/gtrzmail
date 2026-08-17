@@ -1,6 +1,7 @@
 import { StrictMode, Suspense, lazy, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import PasskeyLoginEnhancer from './PasskeyLoginEnhancer';
 import { installPerformanceTuning } from './performance';
 import './styles.css';
 import './enhancements.css';
@@ -37,72 +38,62 @@ if ('serviceWorker' in navigator && !import.meta.env.DEV) {
 
 function useMobileViewport() {
   const [mobile, setMobile] = useState(() => window.matchMedia('(max-width: 820px)').matches);
-
   useEffect(() => {
     const media = window.matchMedia('(max-width: 820px)');
     const change = () => setMobile(media.matches);
     media.addEventListener('change', change);
     return () => media.removeEventListener('change', change);
   }, []);
-
   return mobile;
 }
 
 function DeferredEnhancers() {
   const [ready, setReady] = useState(false);
-
   useEffect(() => {
     const reveal = () => setReady(true);
     const idleWindow = window as Window & {
       requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
       cancelIdleCallback?: (id: number) => void;
     };
-
     if (idleWindow.requestIdleCallback) {
       const id = idleWindow.requestIdleCallback(reveal, { timeout: 700 });
       return () => idleWindow.cancelIdleCallback?.(id);
     }
-
     const timer = window.setTimeout(reveal, 250);
     return () => window.clearTimeout(timer);
   }, []);
 
   if (!ready) return null;
-  return (
-    <Suspense fallback={null}>
-      <AccountMenuOverlay />
-      <ToolbarEnhancer />
-      <ThreadListEnhancer />
-      <ThreadOverlay />
-      <PushEnhancer />
-    </Suspense>
-  );
+  return <Suspense fallback={null}>
+    <AccountMenuOverlay />
+    <ToolbarEnhancer />
+    <ThreadListEnhancer />
+    <ThreadOverlay />
+    <PushEnhancer />
+  </Suspense>;
 }
 
 function RootApp() {
   const mobile = useMobileViewport();
-
   if (mobile) {
-    return (
+    return <>
       <Suspense fallback={<main className="m-boot"><img src="/brand/gtrz-symbol.svg" alt="GTRZ" /></main>}>
         <MobileApp />
         <MobileUXFixes />
         <ContactsIntegration />
       </Suspense>
-    );
+      <PasskeyLoginEnhancer />
+    </>;
   }
 
-  return (
-    <>
-      <App />
-      <Suspense fallback={null}><ContactsIntegration /></Suspense>
-      <DeferredEnhancers />
-    </>
-  );
+  return <>
+    <App />
+    <Suspense fallback={null}><ContactsIntegration /></Suspense>
+    <DeferredEnhancers />
+    <PasskeyLoginEnhancer />
+  </>;
 }
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <RootApp />
-  </StrictMode>
+  <StrictMode><RootApp /></StrictMode>
 );
