@@ -69,6 +69,16 @@ export type SessionAccount = User & {
   current: boolean;
 };
 
+export type AccountSession = {
+  id: string;
+  current: boolean;
+  createdAt: number;
+  lastSeenAt: number;
+  expiresAt: number;
+  userAgent: string;
+  ipFingerprint: string | null;
+};
+
 export type AdminMailbox = {
   id: string;
   address: string;
@@ -149,7 +159,15 @@ export const mailApi = {
     method: 'POST',
     body: JSON.stringify({ userId })
   }),
-  changePassword: (currentPassword: string, newPassword: string) => apiFetch<{ ok: boolean }>('/api/account/password', {
+  accountSessions: () => apiFetch<{ sessions: AccountSession[] }>('/api/account/sessions'),
+  revokeSession: (sessionId: string) => apiFetch<{ ok: boolean }>(`/api/account/sessions/${sessionId}`, {
+    method: 'DELETE'
+  }),
+  revokeOtherSessions: () => apiFetch<{ ok: boolean; revoked: number }>('/api/account/sessions/revoke-others', {
+    method: 'POST',
+    body: '{}'
+  }),
+  changePassword: (currentPassword: string, newPassword: string) => apiFetch<{ ok: boolean; sessionsRevoked?: boolean; sessionRotated?: boolean }>('/api/account/password', {
     method: 'POST',
     body: JSON.stringify({ currentPassword, newPassword })
   }),
