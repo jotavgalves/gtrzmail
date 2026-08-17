@@ -11,6 +11,7 @@ import './enhancements.css';
 import './rich-email.css';
 import './toolbar.css';
 import './thread-push.css';
+import './mobile.css';
 
 if ('serviceWorker' in navigator && !import.meta.env.DEV) {
   window.addEventListener('load', () => {
