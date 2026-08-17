@@ -92,17 +92,37 @@ export class ApiError extends Error {
   }
 }
 
+function reportApiError(path: string, message: string, status: number) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('gtrz-api-error', {
+    detail: { path, message, status }
+  }));
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    credentials: 'same-origin',
-    ...init,
-    headers: {
-      ...(init?.body ? { 'content-type': 'application/json' } : {}),
-      ...(init?.headers || {})
-    }
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+      ...init,
+      headers: {
+        ...(init?.body ? { 'content-type': 'application/json' } : {}),
+        ...(init?.headers || {})
+      }
+    });
+  } catch {
+    const message = 'Sem conexão com o GTRZ Mail. Verifique a internet e tente novamente.';
+    reportApiError(path, message, 0);
+    throw new ApiError(message, 0);
+  }
+
   const payload = await response.json().catch(() => ({})) as { error?: string } & T;
-  if (!response.ok) throw new ApiError(payload.error || 'Falha na comunicação com o GTRZ Mail.', response.status);
+  if (!response.ok) {
+    const message = payload.error || 'Falha na comunicação com o GTRZ Mail.';
+    reportApiError(path, message, response.status);
+    throw new ApiError(message, response.status);
+  }
   return payload;
 }
 
