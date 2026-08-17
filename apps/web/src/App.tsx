@@ -42,7 +42,8 @@ import {
   type User
 } from './api';
 import { demoDetails, demoMailboxes, demoMessages, demoUser } from './demo';
-import { AdminPanel, PasswordPanel } from './SettingsPanels';
+import RichTextEditor from './RichTextEditor';
+import { AdminPanel, PasswordPanel, SignaturePanel } from './SettingsPanels';
 
 const DEMO = import.meta.env.DEV;
 
@@ -55,6 +56,7 @@ type ComposeState = {
   bcc: string;
   subject: string;
   text: string;
+  html: string;
   files: File[];
   draftId?: string;
   inReplyTo?: string;
@@ -113,8 +115,52 @@ function initials(value: string): string {
   return `${parts[0][0] || ''}${parts[1]?.[0] || ''}`.toUpperCase();
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function textToHtml(value: string): string {
+  return escapeHtml(value).replace(/\r?\n/g, '<br>');
+}
+
+function htmlToText(value: string): string {
+  const parsed = new DOMParser().parseFromString(value, 'text/html');
+  return (parsed.body.innerText || parsed.body.textContent || '').replace(/\u00a0/g, ' ');
+}
+
 function quotedText(detail: MessageDetail): string {
   return `\n\n---\nEm ${fullDate(detail.receivedAt)}, ${detail.fromName || detail.fromAddress} escreveu:\n${detail.bodyText}`;
+}
+
+function quotedHtml(detail: MessageDetail): string {
+  const author = escapeHtml(detail.fromName || detail.fromAddress);
+  const body = textToHtml(detail.bodyText);
+  return `<br><br><blockquote data-gtrz-quote="1" style="margin:12px 0 0;padding:0 0 0 12px;border-left:3px solid #45454b;color:#99999f">Em ${escapeHtml(fullDate(detail.receivedAt))}, ${author} escreveu:<br><br>${body}</blockquote>`;
+}
+
+function forwardedHtml(detail: MessageDetail): string {
+  const attachmentText = detail.attachments.filter((item) => item.disposition !== 'inline').length
+    ? `<br>Anexos da mensagem original: ${escapeHtml(detail.attachments.filter((item) => item.disposition !== 'inline').map((item) => item.filename).join(', '))}`
+    : '';
+  return `<br><br><div data-gtrz-forward="1"><hr><strong>Mensagem encaminhada</strong><br><br><strong>De:</strong> ${escapeHtml(detail.fromName || detail.fromAddress)} &lt;${escapeHtml(detail.fromAddress)}&gt;<br><strong>Data:</strong> ${escapeHtml(fullDate(detail.receivedAt))}<br><strong>Assunto:</strong> ${escapeHtml(detail.subject)}<br><strong>Para:</strong> ${escapeHtml(detail.to.join(', '))}${attachmentText}<br><br>${textToHtml(detail.bodyText)}</div>`;
+}
+
+function messageHtmlForDisplay(detail: MessageDetail): string {
+  let html = detail.bodyHtml || '';
+  for (const attachment of detail.attachments) {
+    if (!attachment.contentId) continue;
+    html = html.split(`cid:${attachment.contentId}`).join(`/api/attachments/${attachment.id}?inline=1`);
+  }
+  return html;
+}
+
+function visibleAttachments(detail: MessageDetail) {
+  return detail.attachments.filter((attachment) => attachment.disposition !== 'inline');
 }
 
 function threadReferences(detail: MessageDetail): string[] {
@@ -190,13 +236,15 @@ function Composer({ mailboxes, onClose, onSent, onDraftChanged, initial }: {
   onDraftChanged: () => void;
   initial?: Partial<ComposeState>;
 }) {
+  const initialText = initial?.text || '';
   const [state, setState] = useState<ComposeState>({
     fromMailboxId: initial?.fromMailboxId || mailboxes.find((m) => m.is_default)?.id || mailboxes[0]?.id || '',
     to: initial?.to || '',
     cc: initial?.cc || '',
     bcc: initial?.bcc || '',
     subject: initial?.subject || '',
-    text: initial?.text || '',
+    text: initialText,
+    html: initial?.html || (initialText ? textToHtml(initialText) : ''),
     files: initial?.files || [],
     draftId: initial?.draftId,
     inReplyTo: initial?.inReplyTo,
@@ -207,9 +255,10 @@ function Composer({ mailboxes, onClose, onSent, onDraftChanged, initial }: {
   const [sending, setSending] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [editorTouched, setEditorTouched] = useState(Boolean(initial?.text || initial?.html || initial?.draftId));
   const [error, setError] = useState('');
 
-  const hasContent = Boolean(state.to.trim() || state.cc.trim() || state.bcc.trim() || state.subject.trim() || state.text.trim());
+  const hasContent = Boolean(state.to.trim() || state.cc.trim() || state.bcc.trim() || state.subject.trim() || editorTouched);
 
   const draftPayload = () => ({
     draftId,
@@ -219,6 +268,7 @@ function Composer({ mailboxes, onClose, onSent, onDraftChanged, initial }: {
     bcc: splitEmails(state.bcc),
     subject: state.subject,
     text: state.text,
+    html: state.html,
     inReplyTo: state.inReplyTo,
     references: state.references
   });
@@ -230,6 +280,31 @@ function Composer({ mailboxes, onClose, onSent, onDraftChanged, initial }: {
     window.addEventListener('keydown', key);
     return () => window.removeEventListener('keydown', key);
   }, [onClose, sending]);
+
+  useEffect(() => {
+    if (DEMO || initial?.draftId) return;
+    mailApi.signature().then(({ html }) => {
+      if (!html) return;
+      setState((current) => {
+        if (current.html.includes('data-gtrz-signature')) return current;
+        const signature = `<div data-gtrz-signature="1"><br>${html}</div>`;
+        const markers = [
+          current.html.indexOf('<blockquote data-gtrz-quote'),
+          current.html.indexOf('<div data-gtrz-forward')
+        ].filter((index) => index >= 0);
+        const marker = markers.length ? Math.min(...markers) : -1;
+        let nextHtml: string;
+        if (marker >= 0) {
+          nextHtml = `${current.html.slice(0, marker)}${signature}${current.html.slice(marker)}`;
+        } else if (current.html.trim()) {
+          nextHtml = `${current.html}<div><br></div>${signature}`;
+        } else {
+          nextHtml = `<div><br></div>${signature}`;
+        }
+        return { ...current, html: nextHtml, text: htmlToText(nextHtml) };
+      });
+    }).catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     if (DEMO || sending || !hasContent) return;
@@ -247,7 +322,7 @@ function Composer({ mailboxes, onClose, onSent, onDraftChanged, initial }: {
       }
     }, 1300);
     return () => window.clearTimeout(timer);
-  }, [state.fromMailboxId, state.to, state.cc, state.bcc, state.subject, state.text, state.inReplyTo, sending]);
+  }, [state.fromMailboxId, state.to, state.cc, state.bcc, state.subject, state.text, state.html, state.inReplyTo, editorTouched, sending]);
 
   const submit = async () => {
     if (!splitEmails(state.to).length) {
@@ -271,6 +346,7 @@ function Composer({ mailboxes, onClose, onSent, onDraftChanged, initial }: {
           bcc: splitEmails(state.bcc),
           subject: state.subject,
           text: state.text,
+          html: state.html,
           attachments,
           inReplyTo: state.inReplyTo,
           references: state.references
@@ -289,7 +365,7 @@ function Composer({ mailboxes, onClose, onSent, onDraftChanged, initial }: {
 
   return (
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && !sending && onClose()}>
-      <section className="composer" role="dialog" aria-modal="true" aria-label="Nova mensagem">
+      <section className="composer rich-composer" role="dialog" aria-modal="true" aria-label="Nova mensagem">
         <header className="composer-header">
           <div><PenLine size={17} /> {draftId ? 'Rascunho' : 'Nova mensagem'}</div>
           <div className="composer-save-state">
@@ -313,7 +389,15 @@ function Composer({ mailboxes, onClose, onSent, onDraftChanged, initial }: {
           <div className="composer-field"><label>Cco</label><input value={state.bcc} onChange={(e) => setState((s) => ({ ...s, bcc: e.target.value }))} /></div>
         </>}
         <div className="composer-field"><label>Assunto</label><input value={state.subject} onChange={(e) => setState((s) => ({ ...s, subject: e.target.value }))} placeholder="Assunto" /></div>
-        <textarea className="composer-editor" value={state.text} onChange={(e) => setState((s) => ({ ...s, text: e.target.value }))} placeholder="Escreva sua mensagem..." />
+        <RichTextEditor
+          value={state.html}
+          placeholder="Escreva sua mensagem..."
+          onError={setError}
+          onChange={(html, text) => {
+            setEditorTouched(true);
+            setState((current) => ({ ...current, html, text }));
+          }}
+        />
         {state.files.length > 0 && <div className="compose-files">
           {state.files.map((file, index) => (
             <div className="compose-file" key={`${file.name}-${index}`}>
@@ -323,15 +407,16 @@ function Composer({ mailboxes, onClose, onSent, onDraftChanged, initial }: {
               <button className="icon-button compact" onClick={() => setState((s) => ({ ...s, files: s.files.filter((_, i) => i !== index) }))} aria-label={`Remover ${file.name}`}><X size={14} /></button>
             </div>
           ))}
-          <div className="file-total">Total: {bytesLabel(total)} · anexos são adicionados no envio</div>
+          <div className="file-total">Total: {bytesLabel(total)} · anexos tradicionais são adicionados no envio</div>
         </div>}
         {error && <div className="composer-error">{error}</div>}
         <footer className="composer-footer">
           <label className="attach-button">
             <Paperclip size={17} />
-            Anexar
+            Anexar arquivo
             <input type="file" multiple hidden onChange={(e) => setState((s) => ({ ...s, files: [...s.files, ...Array.from(e.target.files || [])] }))} />
           </label>
+          <span className="composer-rich-hint">Imagens no corpo: use o botão de imagem, cole ou arraste.</span>
           <button className="primary-button" disabled={sending} onClick={submit}>
             {sending ? <LoaderCircle size={17} className="spin" /> : <Send size={17} />}
             Enviar
@@ -578,6 +663,7 @@ export default function App() {
       to: destination,
       subject: detail.subject.toLowerCase().startsWith('re:') ? detail.subject : `Re: ${detail.subject}`,
       text: quotedText(detail),
+      html: quotedHtml(detail),
       inReplyTo: detail.messageId || undefined,
       references: threadReferences(detail)
     });
@@ -595,6 +681,7 @@ export default function App() {
       cc: [...new Set(allOthers)].join(', '),
       subject: detail.subject.toLowerCase().startsWith('re:') ? detail.subject : `Re: ${detail.subject}`,
       text: quotedText(detail),
+      html: quotedHtml(detail),
       inReplyTo: detail.messageId || undefined,
       references: threadReferences(detail)
     });
@@ -602,11 +689,12 @@ export default function App() {
 
   const forward = () => {
     if (!detail) return;
-    const attachmentNote = detail.attachments.length
-      ? `\nAnexos da mensagem original: ${detail.attachments.map((item) => item.filename).join(', ')}\n` : '';
+    const attachmentNote = visibleAttachments(detail).length
+      ? `\nAnexos da mensagem original: ${visibleAttachments(detail).map((item) => item.filename).join(', ')}\n` : '';
     setComposer({
       subject: /^(enc:|fwd:)/i.test(detail.subject) ? detail.subject : `Fwd: ${detail.subject}`,
-      text: `\n\n---------- Mensagem encaminhada ----------\nDe: ${detail.fromName || detail.fromAddress} <${detail.fromAddress}>\nData: ${fullDate(detail.receivedAt)}\nAssunto: ${detail.subject}\nPara: ${detail.to.join(', ')}\n${attachmentNote}\n${detail.bodyText}`
+      text: `\n\n---------- Mensagem encaminhada ----------\nDe: ${detail.fromName || detail.fromAddress} <${detail.fromAddress}>\nData: ${fullDate(detail.receivedAt)}\nAssunto: ${detail.subject}\nPara: ${detail.to.join(', ')}\n${attachmentNote}\n${detail.bodyText}`,
+      html: forwardedHtml(detail)
     });
   };
 
@@ -619,6 +707,7 @@ export default function App() {
       bcc: detail.bcc.join(', '),
       subject: detail.subject,
       text: detail.bodyText,
+      html: detail.bodyHtml || textToHtml(detail.bodyText),
       inReplyTo: detail.inReplyTo || undefined,
       references: detail.references
     });
@@ -751,12 +840,16 @@ export default function App() {
             <div className="sender-info"><strong>{detail.fromName || detail.fromAddress}</strong><span>{detail.fromAddress}</span><small>para {detail.to.join(', ') || user.email}</small></div>
             <time>{fullDate(detail.receivedAt)}</time>
           </div>
-          <div className="mail-body">{detail.bodyText || 'Mensagem sem conteúdo de texto.'}</div>
+          {detail.bodyHtml ? (
+            <div className="mail-body rich-mail-body" dangerouslySetInnerHTML={{ __html: messageHtmlForDisplay(detail) }} />
+          ) : (
+            <div className="mail-body">{detail.bodyText || 'Mensagem sem conteúdo de texto.'}</div>
+          )}
 
-          {detail.attachments.length > 0 && <section className="attachments-section">
-            <h3><Paperclip size={16} /> Anexos <span>{detail.attachments.length}</span></h3>
+          {visibleAttachments(detail).length > 0 && <section className="attachments-section">
+            <h3><Paperclip size={16} /> Anexos <span>{visibleAttachments(detail).length}</span></h3>
             <div className="attachment-grid">
-              {detail.attachments.map((attachment) => {
+              {visibleAttachments(detail).map((attachment) => {
                 const isPdf = attachment.mimeType === 'application/pdf';
                 const Icon = isPdf ? FileText : File;
                 return <div className="attachment-card" key={attachment.id}>
@@ -796,6 +889,7 @@ export default function App() {
           <div className="settings-body">
             <section><h3>Suas caixas</h3>{mailboxes.map((mailbox) => <div className="settings-mailbox" key={mailbox.id}><Mail size={18} /><div><strong>{mailbox.address}</strong><span>{mailbox.display_name}</span></div>{mailbox.is_default === 1 && <b>Principal</b>}</div>)}</section>
             <section className="settings-section"><h3><Bell size={15} /> Notificações</h3><p className="settings-hint">Receba alertas enquanto o GTRZ Mail estiver aberto ou instalado.</p><button className="secondary-button" onClick={() => void enableNotifications()}><Bell size={15} /> Ativar notificações</button></section>
+            <SignaturePanel onNotice={flashNotice} />
             <PasswordPanel onNotice={flashNotice} />
             {user.isAdmin && <AdminPanel onNotice={(message) => { flashNotice(message); void refreshSession(); }} />}
             <section className="security-panel"><ShieldCheck size={22} /><div><h3>Proteção da conta</h3><p>Sessões usam cookie HttpOnly, Secure e SameSite Strict. O conteúdo armazenado no R2 recebe criptografia AES-256-GCM no nível da aplicação.</p></div></section>
