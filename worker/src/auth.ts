@@ -1,5 +1,5 @@
 import type { AppEnv, SessionUser } from './env';
-import { base64ToBytes, constantTimeEqual, randomToken, sha256Hex } from './crypto';
+import { base64ToBytes, bytesToBase64, constantTimeEqual, randomToken, sha256Hex } from './crypto';
 import { json, readJson } from './http';
 
 const encoder = new TextEncoder();
@@ -14,6 +14,7 @@ type UserRow = {
   password_hash: string;
   password_iterations: number;
   is_active: number;
+  is_admin: number;
 };
 
 function cookieValue(request: Request, name: string): string | null {
@@ -51,6 +52,18 @@ async function verifyPassword(password: string, user: UserRow): Promise<boolean>
     )
   );
   return constantTimeEqual(derived, base64ToBytes(user.password_hash));
+}
+
+async function hashPassword(password: string): Promise<{ salt: string; hash: string }> {
+  const salt = crypto.getRandomValues(new Uint8Array(32));
+  const material = await crypto.subtle.importKey('raw', encoder.encode(password), 'PBKDF2', false, ['deriveBits']);
+  const derived = new Uint8Array(await crypto.subtle.deriveBits({
+    name: 'PBKDF2',
+    salt,
+    iterations: MAX_PBKDF2_ITERATIONS,
+    hash: 'SHA-256'
+  }, material, 256));
+  return { salt: bytesToBase64(salt), hash: bytesToBase64(derived) };
 }
 
 async function rateKey(request: Request, email: string): Promise<string> {
@@ -97,7 +110,7 @@ export async function login(request: Request, env: AppEnv): Promise<Response> {
   if (await isRateLimited(env, key, now)) return json({ error: 'Muitas tentativas. Tente novamente mais tarde.' }, 429);
 
   const user = await env.DB.prepare(
-    'SELECT id, email, display_name, password_salt, password_hash, password_iterations, is_active FROM users WHERE email = ? LIMIT 1'
+    'SELECT id, email, display_name, password_salt, password_hash, password_iterations, is_active, is_admin FROM users WHERE email = ? LIMIT 1'
   ).bind(email).first<UserRow>();
 
   const valid = user && user.is_active === 1 ? await verifyPassword(password, user) : false;
@@ -123,7 +136,7 @@ export async function login(request: Request, env: AppEnv): Promise<Response> {
     .bind(crypto.randomUUID(), user.id, 'auth.login', 'user', user.id, now).run();
 
   return json(
-    { user: { id: user.id, email: user.email, displayName: user.display_name } },
+    { user: { id: user.id, email: user.email, displayName: user.display_name, isAdmin: user.is_admin === 1 } },
     200,
     { 'set-cookie': `${COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${maxAge}` }
   );
@@ -135,13 +148,14 @@ export async function getSessionUser(request: Request, env: AppEnv): Promise<Ses
   const sessionId = await sha256Hex(token);
   const now = Math.floor(Date.now() / 1000);
   const row = await env.DB.prepare(
-    `SELECT u.id, u.email, u.display_name
+    `SELECT u.id, u.email, u.display_name, u.is_admin
      FROM sessions s JOIN users u ON u.id = s.user_id
      WHERE s.id = ? AND s.expires_at > ? AND u.is_active = 1 LIMIT 1`
-  ).bind(sessionId, now).first<{ id: string; email: string; display_name: string }>();
+  ).bind(sessionId, now).first<{ id: string; email: string; display_name: string; is_admin: number }>();
   if (!row) return null;
 
-  return { id: row.id, email: row.email, displayName: row.display_name };
+  await env.DB.prepare('UPDATE sessions SET last_seen_at = ? WHERE id = ?').bind(now, sessionId).run();
+  return { id: row.id, email: row.email, displayName: row.display_name, isAdmin: row.is_admin === 1 };
 }
 
 export async function sessionResponse(request: Request, env: AppEnv): Promise<Response> {
@@ -151,6 +165,32 @@ export async function sessionResponse(request: Request, env: AppEnv): Promise<Re
     .bind(user.id)
     .all<{ id: string; address: string; display_name: string; is_default: number }>();
   return json({ user, mailboxes: mailboxes.results });
+}
+
+export async function changePassword(request: Request, env: AppEnv, user: SessionUser): Promise<Response> {
+  let payload: { currentPassword?: string; newPassword?: string };
+  try {
+    payload = await readJson(request);
+  } catch {
+    return json({ error: 'Dados inválidos.' }, 400);
+  }
+  const currentPassword = payload.currentPassword || '';
+  const newPassword = payload.newPassword || '';
+  if (newPassword.length < 12) return json({ error: 'A nova senha precisa ter pelo menos 12 caracteres.' }, 400);
+
+  const row = await env.DB.prepare(
+    'SELECT id, email, display_name, password_salt, password_hash, password_iterations, is_active, is_admin FROM users WHERE id = ? LIMIT 1'
+  ).bind(user.id).first<UserRow>();
+  if (!row || !(await verifyPassword(currentPassword, row))) return json({ error: 'Senha atual incorreta.' }, 401);
+
+  const credentials = await hashPassword(newPassword);
+  await env.DB.prepare(
+    'UPDATE users SET password_salt = ?, password_hash = ?, password_iterations = ? WHERE id = ?'
+  ).bind(credentials.salt, credentials.hash, MAX_PBKDF2_ITERATIONS, user.id).run();
+  await env.DB.prepare(
+    'INSERT INTO audit_logs (id, user_id, action, target_type, target_id, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+  ).bind(crypto.randomUUID(), user.id, 'auth.password_changed', 'user', user.id, Math.floor(Date.now() / 1000)).run();
+  return json({ ok: true });
 }
 
 export async function logout(request: Request, env: AppEnv): Promise<Response> {
