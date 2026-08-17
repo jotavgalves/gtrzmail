@@ -2,23 +2,37 @@
 
 ## Estado funcional
 
-O GTRZ Mail usa Cloudflare Worker + D1 + R2, Cloudflare Email Routing para entrada e Resend para saída. Antes de cada publicação de alterações de schema, aplique as migrations D1 primeiro e só então faça deploy do Worker.
+O GTRZ Mail usa Cloudflare Worker + D1 + R2, Cloudflare Email Routing para entrada e Resend para saída.
 
-## Publicar esta versão
+A migration `0002_product_features.sql` já foi aplicada no D1 remoto. Ela adiciona `users.is_admin`, promove a conta mais antiga existente a administradora e adiciona estado de restauração às mensagens.
+
+## Publicar uma versão sem migration pendente
 
 Na máquina autorizada:
 
 ```powershell
+cd C:\Users\CRIACAO\gtrzmail
 git pull --ff-only
 npm install
-npm run db:migrate:remote
 npm run build
 npm run typecheck
 npm run deploy:dry
 npm run deploy
 ```
 
-A migration `0002_product_features.sql` adiciona `users.is_admin`, promove a conta mais antiga existente a administradora e adiciona estado de restauração às mensagens.
+Se uma versão futura adicionar alteração de schema, aplique a migration D1 primeiro e só então publique o Worker que depende dela.
+
+## Alternância de contas
+
+A alternância usa sessões independentes com cookies HttpOnly separados por conta.
+
+- o chip com avatar, nome, e-mail e seta no topo direito é o seletor principal;
+- clicar no chip abre as contas autenticadas no navegador;
+- cada nova conta precisa ser autenticada uma vez antes de ficar disponível para troca rápida;
+- a senha e os tokens de sessão não são armazenados no `localStorage`;
+- `Nova caixa`/alias pertence ao mesmo usuário e não cria um login separado;
+- `Criar conta` no painel administrativo cria um usuário com login próprio;
+- sair encerra a sessão da conta atualmente ativa.
 
 ## Chave mestra: não rotacionar às cegas
 
@@ -51,17 +65,19 @@ Depois de observar autenticação e reputação, migre gradualmente para `quaran
 ## Testes mínimos após deploy
 
 1. Login e logout.
-2. Receber mensagem externa em `joao@gtrz.com.br`.
-3. Abrir e baixar um anexo.
-4. Responder e confirmar threading no destinatário.
-5. Responder a todos.
-6. Encaminhar.
-7. Criar rascunho, fechar composer, reabrir e enviar.
-8. Arquivar, mover para lixeira, restaurar e excluir permanentemente.
-9. Enviar mensagem e confirmar `sent → delivered` pelo webhook.
-10. Criar uma conta de teste pelo painel administrativo e fazer login nela.
-11. Criar uma caixa adicional e confirmar envio. Para recebimento, a Cloudflare precisa ter uma regra compatível ou catch-all apontando para o Worker.
-12. Ativar notificações e verificar badge de não lidas no PWA compatível.
+2. Clicar no chip da conta no topo e abrir o menu.
+3. Adicionar uma segunda conta e alternar entre as duas sem redigitar senha durante a validade das sessões.
+4. Receber mensagem externa em uma caixa configurada.
+5. Abrir e baixar um anexo.
+6. Responder e confirmar threading no destinatário.
+7. Responder a todos.
+8. Encaminhar.
+9. Criar rascunho, fechar composer, reabrir e enviar.
+10. Arquivar, mover para lixeira, restaurar e excluir permanentemente.
+11. Enviar mensagem e confirmar `sent → delivered` pelo webhook.
+12. Criar uma conta de teste pelo painel administrativo e fazer login nela.
+13. Criar uma caixa adicional e confirmar envio. Para recebimento, a Cloudflare precisa ter uma regra compatível ou catch-all apontando para o Worker.
+14. Ativar notificações e verificar badge de não lidas no PWA compatível.
 
 ## Observações de segurança
 
