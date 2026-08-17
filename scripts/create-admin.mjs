@@ -24,6 +24,6 @@ const now = Math.floor(Date.now() / 1000);
 const esc = (value) => value.replaceAll("'", "''");
 
 console.log('\nExecute no D1 remoto:\n');
-console.log(`INSERT INTO users (id,email,display_name,password_salt,password_hash,password_iterations,is_active,created_at) VALUES ('${userId}','${esc(email)}','${esc(displayName)}','${salt.toString('base64')}','${hash.toString('base64')}',${iterations},1,${now});`);
+console.log(`INSERT INTO users (id,email,display_name,password_salt,password_hash,password_iterations,is_active,created_at,is_admin) VALUES ('${userId}','${esc(email)}','${esc(displayName)}','${salt.toString('base64')}','${hash.toString('base64')}',${iterations},1,${now},1);`);
 console.log(`INSERT INTO mailboxes (id,user_id,address,display_name,is_default,created_at) VALUES ('${mailboxId}','${userId}','${esc(mailbox.toLowerCase())}','${esc(displayName)}',1,${now});`);
 console.log('\nExemplo: npx wrangler d1 execute gtrz-mail --remote --command "<SQL>"');
