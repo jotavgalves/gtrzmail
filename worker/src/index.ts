@@ -32,6 +32,12 @@ import {
 } from './contacts';
 import { assertSameOrigin, json, readJson, withSecurityHeaders } from './http';
 import {
+  ipAccessGate,
+  listBlockedIps,
+  loginProtectionState,
+  unblockIp
+} from './ip-security';
+import {
   finalizeKeyRotation,
   keyRotationStatus,
   prepareKeyRotation,
@@ -46,7 +52,6 @@ import {
   deletePasskey,
   listPasskeys,
   loginOptions,
-  passwordStepUp,
   registrationOptions,
   requireRecentStepUp,
   securityStatus,
@@ -58,6 +63,7 @@ import {
 import { getSignature, updateSignature } from './profile';
 import { pushPublicKey, subscribePush, unsubscribePush } from './push';
 import { receiveEmailFast } from './receive-fast';
+import { passwordStepUpHardened } from './reauth-security';
 import { listAdminSecurityEvents, listSecurityEvents } from './security-events';
 import { sendMessageGuarded } from './send-security';
 import {
@@ -91,6 +97,7 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   const localOrigin = requestOrigin.startsWith('http://localhost:') || requestOrigin.startsWith('http://127.0.0.1:');
   if (!assertSameOrigin(request, localOrigin ? requestOrigin : env.APP_ORIGIN)) return json({ error: 'Origem não autorizada.' }, 403);
 
+  if (path === '/api/auth/login-state' && request.method === 'GET') return loginProtectionState(request, env);
   if (path === '/api/auth/login' && request.method === 'POST') return loginHardened(request, env);
   if (path === '/api/auth/passkey/options' && request.method === 'POST') return loginOptions(request, env);
   if (path === '/api/auth/passkey/verify' && request.method === 'POST') return verifyLogin(request, env);
@@ -106,7 +113,7 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
 
   if (path === '/api/account/security' && request.method === 'GET') return securityStatus(request, env, user);
   if (path === '/api/account/security-events' && request.method === 'GET') return listSecurityEvents(env, user);
-  if (path === '/api/account/reauth/password' && request.method === 'POST') return passwordStepUp(request, env, user);
+  if (path === '/api/account/reauth/password' && request.method === 'POST') return passwordStepUpHardened(request, env, user);
   if (path === '/api/account/reauth/passkey/options' && request.method === 'POST') return stepUpOptions(env, user);
   if (path === '/api/account/reauth/passkey/verify' && request.method === 'POST') return verifyStepUp(request, env, user);
   if (path === '/api/account/passkeys' && request.method === 'GET') return listPasskeys(env, user);
@@ -134,6 +141,15 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
   if (path === '/api/admin/security-events' && request.method === 'GET') {
     const denied = await requireRecentStepUp(request, env, user);
     return denied || listAdminSecurityEvents(env, user);
+  }
+  if (path === '/api/admin/blocked-ips' && request.method === 'GET') {
+    const denied = await requireRecentStepUp(request, env, user);
+    return denied || listBlockedIps(env, user);
+  }
+  const unblockIpMatch = path.match(/^\/api\/admin\/blocked-ips\/([a-f0-9]{64})$/i);
+  if (unblockIpMatch && request.method === 'DELETE') {
+    const denied = await requireRecentStepUp(request, env, user);
+    return denied || unblockIp(env, user, unblockIpMatch[1]);
   }
   if (path === '/api/admin/accounts' && request.method === 'POST') {
     const denied = await requireRecentStepUp(request, env, user);
@@ -189,6 +205,9 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
 export default {
   async fetch(request, env): Promise<Response> {
     try {
+      const blocked = await ipAccessGate(request, env);
+      if (blocked) return withSecurityHeaders(blocked);
+
       const url = new URL(request.url);
       const response = url.pathname.startsWith('/api/') ? await api(request, env) : await env.ASSETS.fetch(request);
       return withSecurityHeaders(response);
