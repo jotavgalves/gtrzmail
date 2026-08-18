@@ -2,9 +2,8 @@ import type { AppEnv } from './env';
 import { base64ToBytes, constantTimeEqual, randomToken, sha256Hex } from './crypto';
 import { json, readJson } from './http';
 import {
-  clearPasswordFailures,
-  enforceLoginProtection,
-  recordPasswordFailure
+  beginPasswordVerification,
+  finishPasswordVerification
 } from './ip-security';
 
 const encoder = new TextEncoder();
@@ -82,11 +81,11 @@ export async function loginHardened(request: Request, env: AppEnv): Promise<Resp
   const password = payload.password || '';
   if (!email || !password) return json({ error: 'Informe e-mail e senha.' }, 400);
 
-  // The gate is entirely server-side and keyed from Cloudflare's CF-Connecting-IP.
-  // Clearing cookies, changing browser storage, rotating usernames or forging
-  // X-Forwarded-For therefore does not reset the attempt state.
-  const denied = await enforceLoginProtection(request, env, payload.turnstileToken);
-  if (denied) return denied;
+  // D1 grants a short per-IP verification lease before PBKDF2. Parallel requests
+  // from the same IP cannot race several guesses through before the counter moves.
+  const started = await beginPasswordVerification(request, env, email, payload.turnstileToken);
+  if (started.denied) return started.denied;
+  if (!started.reservation) return json({ error: 'Não foi possível reservar a tentativa de autenticação.' }, 503);
 
   const user = await env.DB.prepare(
     'SELECT id, email, display_name, password_salt, password_hash, password_iterations, is_active, is_admin FROM users WHERE email = ? LIMIT 1'
@@ -97,13 +96,16 @@ export async function loginHardened(request: Request, env: AppEnv): Promise<Resp
   else await dummyPasswordWork(password);
 
   if (!user || !valid) {
-    const state = await recordPasswordFailure(request, env, email);
+    const state = await finishPasswordVerification(env, started.reservation, false);
+    if (!state) return json({ error: 'Não foi possível registrar a tentativa de autenticação.' }, 503);
+
     if (state.permanentlyBlocked) {
       return json({
         error: 'Este IP foi bloqueado após a segunda sequência de três senhas incorretas. Um administrador precisa liberá-lo.',
         code: 'IP_BLOCKED'
       }, 403);
     }
+
     if (state.cooldownSeconds > 0) {
       return json({
         error: 'Três senhas incorretas. Este IP ficará bloqueado por 30 minutos; depois será exigido um CAPTCHA para liberar mais três tentativas.',
@@ -112,6 +114,7 @@ export async function loginHardened(request: Request, env: AppEnv): Promise<Resp
         attemptsRemaining: state.attemptsRemaining
       }, 429, { 'retry-after': String(state.cooldownSeconds) });
     }
+
     return json({
       error: `Credenciais inválidas. Restam ${state.attemptsRemaining} tentativa${state.attemptsRemaining === 1 ? '' : 's'} antes do bloqueio.`,
       code: 'INVALID_CREDENTIALS',
@@ -119,7 +122,11 @@ export async function loginHardened(request: Request, env: AppEnv): Promise<Resp
     }, 401);
   }
 
-  await clearPasswordFailures(request, env);
+  // A correct password never counts as a failure. For a clean single-account
+  // sequence it resets the IP state; if attackers have rotated target accounts,
+  // only the verification lease is released and prior failures remain.
+  await finishPasswordVerification(env, started.reservation, true);
+
   const now = Math.floor(Date.now() / 1000);
   await env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(now).run();
 
