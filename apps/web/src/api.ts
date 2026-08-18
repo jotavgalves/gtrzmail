@@ -91,6 +91,25 @@ export type SecurityEvent = {
   email?: string | null;
 };
 
+export type LoginProtectionState = {
+  stage: 1 | 2;
+  attemptsRemaining: number;
+  cooldownSeconds: number;
+  captchaRequired: boolean;
+  captchaConfigured: boolean;
+  siteKey: string | null;
+};
+
+export type BlockedIp = {
+  id: string;
+  ip: string;
+  blockedAt: number | null;
+  lastFailedAt: number | null;
+  lastEmail: string | null;
+  userAgent: string | null;
+  updatedAt: number;
+};
+
 export type AdminMailbox = { id: string; address: string; displayName: string; isDefault: boolean };
 export type AdminAccount = {
   id: string;
@@ -144,7 +163,11 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const mailApi = {
   session: () => apiFetch<{ user: User; mailboxes: Mailbox[] }>('/api/session'),
-  login: (email: string, password: string) => apiFetch<{ user: User }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  loginProtectionState: () => apiFetch<LoginProtectionState>('/api/auth/login-state'),
+  login: (email: string, password: string, turnstileToken?: string) => apiFetch<{ user: User }>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ email, password, ...(turnstileToken ? { turnstileToken } : {}) })
+  }),
   passkeyLoginOptions: (email: string) => apiFetch<{ challengeId: string; options: any; available: boolean }>('/api/auth/passkey/options', { method: 'POST', body: JSON.stringify({ email }) }),
   passkeyLoginVerify: (challengeId: string, response: unknown) => apiFetch<{ ok: boolean; user: User }>('/api/auth/passkey/verify', { method: 'POST', body: JSON.stringify({ challengeId, response }) }),
   logout: () => apiFetch<{ ok: boolean }>('/api/auth/logout', { method: 'POST', body: '{}' }),
@@ -153,6 +176,8 @@ export const mailApi = {
   securityStatus: () => apiFetch<SecurityStatus>('/api/account/security'),
   securityEvents: () => apiFetch<{ events: SecurityEvent[] }>('/api/account/security-events'),
   adminSecurityEvents: () => apiFetch<{ events: SecurityEvent[] }>('/api/admin/security-events'),
+  adminBlockedIps: () => apiFetch<{ ips: BlockedIp[] }>('/api/admin/blocked-ips'),
+  unblockIp: (id: string) => apiFetch<{ ok: boolean }>(`/api/admin/blocked-ips/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   passwordStepUp: (password: string) => apiFetch<{ ok: boolean; validForSeconds: number }>('/api/account/reauth/password', { method: 'POST', body: JSON.stringify({ password }) }),
   passkeyStepUpOptions: () => apiFetch<{ challengeId: string; options: any; available: boolean }>('/api/account/reauth/passkey/options', { method: 'POST', body: '{}' }),
   passkeyStepUpVerify: (challengeId: string, response: unknown) => apiFetch<{ ok: boolean; validForSeconds: number }>('/api/account/reauth/passkey/verify', { method: 'POST', body: JSON.stringify({ challengeId, response }) }),
