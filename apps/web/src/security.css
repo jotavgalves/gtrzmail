@@ -1,7 +1,8 @@
 .passkey-panel,
 .device-sessions-panel,
 .security-events-panel,
-.security-stepup {
+.security-stepup,
+.blocked-ips-panel {
   display: grid;
   gap: 12px;
 }
@@ -22,7 +23,8 @@
   margin: 0;
 }
 
-.security-event-list {
+.security-event-list,
+.blocked-ip-list {
   display: grid;
   gap: 8px;
 }
@@ -64,6 +66,56 @@
   background: rgba(255, 70, 70, .05);
 }
 
+.blocked-ip-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid rgba(255, 80, 90, .18);
+  border-radius: 12px;
+  background: rgba(255, 45, 55, .045);
+}
+
+.blocked-ip-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.blocked-ip-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #f0f0f2;
+  font: 600 13px ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.blocked-ip-copy span,
+.blocked-ip-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #8c8c94;
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.blocked-ip-copy small {
+  color: #696970;
+}
+
+.blocked-ip-empty {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 10px 12px;
+  border: 1px solid rgba(100, 190, 130, .16);
+  border-radius: 11px;
+  background: rgba(70, 150, 95, .045);
+  color: #93c7a4;
+  font-size: 11px;
+}
+
 .passkey-login-host {
   display: grid;
   gap: 8px;
@@ -78,5 +130,13 @@
 @media (max-width: 820px) {
   .security-event {
     min-height: 48px;
+  }
+
+  .blocked-ip-card {
+    grid-template-columns: 1fr;
+  }
+
+  .blocked-ip-card .secondary-button {
+    width: 100%;
   }
 }
