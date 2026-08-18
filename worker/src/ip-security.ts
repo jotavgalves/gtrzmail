@@ -76,8 +76,78 @@ function clientIp(request: Request): string {
   return (request.headers.get('CF-Connecting-IP') || 'unknown').trim().slice(0, 96);
 }
 
+function parseIpv4(value: string): number[] | null {
+  const parts = value.split('.');
+  if (parts.length !== 4) return null;
+  const octets = parts.map((part) => Number(part));
+  if (octets.some((part, index) => !/^\d{1,3}$/.test(parts[index]) || !Number.isInteger(part) || part < 0 || part > 255)) return null;
+  return octets;
+}
+
+function expandIpv6(value: string): number[] | null {
+  let input = value.toLowerCase().split('%')[0];
+  if (input.startsWith('[') && input.endsWith(']')) input = input.slice(1, -1);
+
+  const ipv4TailMatch = input.match(/(^|:)(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (ipv4TailMatch) {
+    const octets = parseIpv4(ipv4TailMatch[2]);
+    if (!octets) return null;
+    const high = ((octets[0] << 8) | octets[1]).toString(16);
+    const low = ((octets[2] << 8) | octets[3]).toString(16);
+    input = `${input.slice(0, -ipv4TailMatch[2].length)}${high}:${low}`;
+  }
+
+  const halves = input.split('::');
+  if (halves.length > 2) return null;
+
+  const parseHalf = (half: string): number[] | null => {
+    if (!half) return [];
+    const parts = half.split(':');
+    const words: number[] = [];
+    for (const part of parts) {
+      if (!/^[0-9a-f]{1,4}$/.test(part)) return null;
+      const word = Number.parseInt(part, 16);
+      if (!Number.isInteger(word) || word < 0 || word > 0xffff) return null;
+      words.push(word);
+    }
+    return words;
+  };
+
+  const left = parseHalf(halves[0]);
+  const right = parseHalf(halves[1] || '');
+  if (!left || !right) return null;
+
+  if (halves.length === 1) return left.length === 8 ? left : null;
+  const missing = 8 - left.length - right.length;
+  if (missing < 1) return null;
+  return [...left, ...Array.from({ length: missing }, () => 0), ...right];
+}
+
+/**
+ * Mobile networks and privacy-address implementations can rotate the lower 64
+ * bits of an IPv6 address while the client remains on the same routed network.
+ * Hashing the full IPv6 address therefore allowed a reload or credential change
+ * to appear as a fresh caller. We bucket native IPv6 by /64 while keeping IPv4
+ * at host granularity. IPv4-mapped IPv6 is converted back to its IPv4 address.
+ */
+function authNetworkIdentity(ip: string): string {
+  const ipv4 = parseIpv4(ip);
+  if (ipv4) return `v4:${ipv4.join('.')}`;
+
+  const words = expandIpv6(ip);
+  if (!words) return `raw:${ip.toLowerCase()}`;
+
+  const mappedV4 = words.slice(0, 5).every((word) => word === 0) && words[5] === 0xffff;
+  if (mappedV4) {
+    const mapped = [words[6] >> 8, words[6] & 0xff, words[7] >> 8, words[7] & 0xff];
+    return `v4:${mapped.join('.')}`;
+  }
+
+  return `v6:${words.slice(0, 4).map((word) => word.toString(16).padStart(4, '0')).join(':')}::/64`;
+}
+
 export async function clientIpHash(request: Request): Promise<string> {
-  return sha256Hex(`gtrz-auth-ip:${clientIp(request)}`);
+  return sha256Hex(`gtrz-auth-ip:${authNetworkIdentity(clientIp(request))}`);
 }
 
 async function emailHash(email: string): Promise<string> {
