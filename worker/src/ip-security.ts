@@ -5,6 +5,7 @@ import { json } from './http';
 const FIRST_STAGE_ATTEMPTS = 3;
 const SECOND_STAGE_ATTEMPTS = 3;
 const COOLDOWN_SECONDS = 30 * 60;
+const VERIFICATION_LOCK_SECONDS = 30;
 const REAUTH_ATTEMPTS = 3;
 const REAUTH_COOLDOWN_SECONDS = 30 * 60;
 const TURNSTILE_ACTION = 'login_after_failures';
@@ -21,6 +22,10 @@ type IpSecurityRow = {
   blocked_at: number | null;
   last_failed_at: number | null;
   last_email: string | null;
+  protected_email_hash: string | null;
+  mixed_targets: number;
+  verification_lock_until: number;
+  verification_nonce: string | null;
   user_agent: string | null;
   created_at: number;
   updated_at: number;
@@ -33,6 +38,20 @@ type TurnstileResult = {
   'error-codes'?: string[];
 };
 
+type PasswordVerificationReservation = {
+  ipHash: string;
+  nonce: string;
+  emailHash: string;
+  mixedTargets: boolean;
+  protectedEmailHash: string | null;
+};
+
+type ReauthReservation = {
+  userId: string;
+  ipHash: string;
+  nonce: string;
+};
+
 export type LoginProtectionState = {
   stage: 1 | 2;
   attemptsRemaining: number;
@@ -42,9 +61,18 @@ export type LoginProtectionState = {
   siteKey: string | null;
 };
 
+export type BeginPasswordVerificationResult = {
+  denied?: Response;
+  reservation?: PasswordVerificationReservation;
+};
+
+export type PasswordFailureResult = LoginProtectionState & {
+  permanentlyBlocked: boolean;
+};
+
 function clientIp(request: Request): string {
-  // On Cloudflare Workers this header is authored by Cloudflare. We deliberately
-  // do not trust X-Forwarded-For or a client-supplied cookie/header for counting.
+  // Cloudflare authors CF-Connecting-IP at the edge. The counter deliberately
+  // ignores X-Forwarded-For, cookies, localStorage, query strings and user input.
   return (request.headers.get('CF-Connecting-IP') || 'unknown').trim().slice(0, 96);
 }
 
@@ -52,18 +80,26 @@ export async function clientIpHash(request: Request): Promise<string> {
   return sha256Hex(`gtrz-auth-ip:${clientIp(request)}`);
 }
 
+async function emailHash(email: string): Promise<string> {
+  return sha256Hex(`gtrz-auth-email:${email.trim().toLowerCase()}`);
+}
+
 function turnstileConfigured(env: AppEnv): boolean {
   return Boolean(env.TURNSTILE_SITE_KEY && env.TURNSTILE_SECRET_KEY);
 }
 
-async function rowForRequest(request: Request, env: AppEnv): Promise<IpSecurityRow | null> {
-  const hash = await clientIpHash(request);
+async function rowForHash(env: AppEnv, hash: string): Promise<IpSecurityRow | null> {
   return env.DB.prepare(
     `SELECT ip_hash, ip_address, stage, failures, cooldown_until, captcha_required,
-            permanently_blocked, blocked_at, last_failed_at, last_email, user_agent,
-            created_at, updated_at
+            permanently_blocked, blocked_at, last_failed_at, last_email,
+            protected_email_hash, mixed_targets, verification_lock_until,
+            verification_nonce, user_agent, created_at, updated_at
      FROM auth_ip_security WHERE ip_hash = ? LIMIT 1`
   ).bind(hash).first<IpSecurityRow>();
+}
+
+async function rowForRequest(request: Request, env: AppEnv): Promise<IpSecurityRow | null> {
+  return rowForHash(env, await clientIpHash(request));
 }
 
 async function audit(env: AppEnv, action: string, targetId: string, userId: string | null = null): Promise<void> {
@@ -94,6 +130,22 @@ function protectionState(row: IpSecurityRow | null, env: AppEnv, now = Math.floo
     captchaConfigured: turnstileConfigured(env),
     siteKey: env.TURNSTILE_SITE_KEY || null
   };
+}
+
+function cooldownResponse(row: IpSecurityRow, now: number): Response {
+  const retryAfter = Math.max(1, row.cooldown_until - now);
+  return json({
+    error: 'Muitas senhas incorretas. Este IP está temporariamente bloqueado por 30 minutos.',
+    code: 'AUTH_COOLDOWN',
+    retryAfterSeconds: retryAfter
+  }, 429, { 'retry-after': String(retryAfter) });
+}
+
+function inProgressResponse(): Response {
+  return json({
+    error: 'Outra tentativa de senha deste IP está sendo validada. Aguarde um instante.',
+    code: 'AUTH_IN_PROGRESS'
+  }, 429, { 'retry-after': '2' });
 }
 
 export async function loginProtectionState(request: Request, env: AppEnv): Promise<Response> {
@@ -130,125 +182,225 @@ async function verifyTurnstile(request: Request, env: AppEnv, token: string): Pr
   return Boolean(result.hostname && result.hostname.toLowerCase() === expectedHostname);
 }
 
-export async function enforceLoginProtection(
+async function clearCaptchaAfterVerification(
   request: Request,
   env: AppEnv,
-  turnstileToken: string | undefined
+  row: IpSecurityRow,
+  token: string | undefined,
+  now: number
 ): Promise<Response | null> {
-  const row = await rowForRequest(request, env);
-  if (!row) return null;
-  if (row.permanently_blocked) return blockedJson(row.ip_hash);
-
-  const now = Math.floor(Date.now() / 1000);
-  if (row.cooldown_until > now) {
-    const retryAfter = row.cooldown_until - now;
+  if (row.stage !== 2 || row.captcha_required !== 1) return null;
+  if (!turnstileConfigured(env)) {
     return json({
-      error: 'Muitas senhas incorretas. Este IP está temporariamente bloqueado por 30 minutos.',
-      code: 'AUTH_COOLDOWN',
-      retryAfterSeconds: retryAfter
-    }, 429, { 'retry-after': String(retryAfter) });
+      error: 'A verificação anti-bot ainda não está configurada no servidor.',
+      code: 'CAPTCHA_NOT_CONFIGURED'
+    }, 503);
+  }
+  if (!token) {
+    return json({ error: 'Conclua a verificação anti-bot antes de tentar novamente.', code: 'CAPTCHA_REQUIRED' }, 428);
+  }
+  if (!(await verifyTurnstile(request, env, token))) {
+    return json({ error: 'A verificação anti-bot não foi aceita. Gere um novo desafio e tente novamente.', code: 'CAPTCHA_INVALID' }, 403);
   }
 
-  if (row.stage === 2 && row.captcha_required === 1) {
-    if (!turnstileConfigured(env)) {
-      return json({
-        error: 'A verificação anti-bot ainda não está configurada no servidor.',
-        code: 'CAPTCHA_NOT_CONFIGURED'
-      }, 503);
-    }
-    if (!turnstileToken) {
-      return json({ error: 'Conclua a verificação anti-bot antes de tentar novamente.', code: 'CAPTCHA_REQUIRED' }, 428);
-    }
-    if (!(await verifyTurnstile(request, env, turnstileToken))) {
-      return json({ error: 'A verificação anti-bot não foi aceita. Gere um novo desafio e tente novamente.', code: 'CAPTCHA_INVALID' }, 403);
-    }
-
-    await env.DB.prepare(
-      `UPDATE auth_ip_security
-       SET captcha_required = 0, updated_at = ?
-       WHERE ip_hash = ? AND stage = 2 AND permanently_blocked = 0`
-    ).bind(now, row.ip_hash).run();
-    await audit(env, 'auth.turnstile_passed', row.ip_hash.slice(0, 16));
-  }
-
+  await env.DB.prepare(
+    `UPDATE auth_ip_security
+     SET captcha_required = 0, updated_at = ?
+     WHERE ip_hash = ? AND stage = 2 AND permanently_blocked = 0
+       AND cooldown_until <= ? AND captcha_required = 1`
+  ).bind(now, row.ip_hash, now).run();
+  await audit(env, 'auth.turnstile_passed', row.ip_hash.slice(0, 16));
   return null;
 }
 
-export async function recordPasswordFailure(request: Request, env: AppEnv, email: string): Promise<LoginProtectionState & { permanentlyBlocked: boolean }> {
+/**
+ * Serializes password verification per IP. The D1 row is a short lease acquired
+ * before PBKDF2 runs. Concurrent requests cannot all reach password verification,
+ * which closes the classic burst race where several guesses arrive before the
+ * third failure is persisted.
+ */
+export async function beginPasswordVerification(
+  request: Request,
+  env: AppEnv,
+  email: string,
+  turnstileToken?: string
+): Promise<BeginPasswordVerificationResult> {
   const now = Math.floor(Date.now() / 1000);
   const hash = await clientIpHash(request);
-  const ip = clientIp(request);
-  const userAgent = (request.headers.get('user-agent') || '').slice(0, 300);
-  const normalizedEmail = email.trim().toLowerCase().slice(0, 254);
+  let row = await rowForHash(env, hash);
 
-  const row = await env.DB.prepare(
-    `INSERT INTO auth_ip_security (
-       ip_hash, ip_address, stage, failures, cooldown_until, captcha_required,
-       permanently_blocked, blocked_at, last_failed_at, last_email, user_agent,
-       created_at, updated_at
-     ) VALUES (?, ?, 1, 1, 0, 0, 0, NULL, ?, ?, ?, ?, ?)
-     ON CONFLICT(ip_hash) DO UPDATE SET
-       ip_address = excluded.ip_address,
-       stage = CASE
-         WHEN auth_ip_security.permanently_blocked = 1 THEN auth_ip_security.stage
-         WHEN auth_ip_security.stage = 1 AND auth_ip_security.failures + 1 >= ? THEN 2
-         ELSE auth_ip_security.stage
-       END,
-       failures = CASE
-         WHEN auth_ip_security.permanently_blocked = 1 THEN auth_ip_security.failures
-         WHEN auth_ip_security.stage = 1 AND auth_ip_security.failures + 1 >= ? THEN 0
-         WHEN auth_ip_security.stage = 2 AND auth_ip_security.failures + 1 >= ? THEN ?
-         ELSE auth_ip_security.failures + 1
-       END,
-       cooldown_until = CASE
-         WHEN auth_ip_security.stage = 1 AND auth_ip_security.failures + 1 >= ? THEN ?
-         ELSE auth_ip_security.cooldown_until
-       END,
-       captcha_required = CASE
-         WHEN auth_ip_security.stage = 1 AND auth_ip_security.failures + 1 >= ? THEN 1
-         ELSE auth_ip_security.captcha_required
-       END,
-       permanently_blocked = CASE
-         WHEN auth_ip_security.stage = 2 AND auth_ip_security.failures + 1 >= ? THEN 1
-         ELSE auth_ip_security.permanently_blocked
-       END,
-       blocked_at = CASE
-         WHEN auth_ip_security.stage = 2 AND auth_ip_security.failures + 1 >= ? THEN ?
-         ELSE auth_ip_security.blocked_at
-       END,
-       last_failed_at = ?,
-       last_email = excluded.last_email,
-       user_agent = excluded.user_agent,
-       updated_at = ?
-     RETURNING ip_hash, ip_address, stage, failures, cooldown_until, captcha_required,
-               permanently_blocked, blocked_at, last_failed_at, last_email, user_agent,
-               created_at, updated_at`
-  ).bind(
-    hash, ip, now, normalizedEmail || null, userAgent || null, now, now,
-    FIRST_STAGE_ATTEMPTS,
-    FIRST_STAGE_ATTEMPTS,
-    SECOND_STAGE_ATTEMPTS, SECOND_STAGE_ATTEMPTS,
-    FIRST_STAGE_ATTEMPTS, now + COOLDOWN_SECONDS,
-    FIRST_STAGE_ATTEMPTS,
-    SECOND_STAGE_ATTEMPTS,
-    SECOND_STAGE_ATTEMPTS, now,
-    now, now
-  ).first<IpSecurityRow>();
+  if (row?.permanently_blocked) return { denied: blockedJson(hash) };
+  if (row && row.cooldown_until > now) return { denied: cooldownResponse(row, now) };
 
-  if (!row) throw new Error('Could not persist login protection state');
-
-  if (row.permanently_blocked) {
-    await audit(env, 'auth.ip_permanently_blocked', hash.slice(0, 16));
-  } else if (row.stage === 2 && row.cooldown_until > now && row.failures === 0) {
-    await audit(env, 'auth.ip_cooldown_started', hash.slice(0, 16));
+  if (row?.stage === 2 && row.captcha_required === 1) {
+    const captchaDenied = await clearCaptchaAfterVerification(request, env, row, turnstileToken, now);
+    if (captchaDenied) return { denied: captchaDenied };
+    row = await rowForHash(env, hash);
+    if (row?.permanently_blocked) return { denied: blockedJson(hash) };
+    if (row && row.cooldown_until > now) return { denied: cooldownResponse(row, now) };
   }
 
-  return { ...protectionState(row, env, now), permanentlyBlocked: row.permanently_blocked === 1 };
+  const nonce = crypto.randomUUID();
+  const protectedHash = await emailHash(email);
+  const ip = clientIp(request);
+  const userAgent = (request.headers.get('user-agent') || '').slice(0, 300);
+  const lockUntil = now + VERIFICATION_LOCK_SECONDS;
+
+  const acquired = await env.DB.prepare(
+    `INSERT INTO auth_ip_security (
+       ip_hash, ip_address, stage, failures, cooldown_until, captcha_required,
+       permanently_blocked, blocked_at, last_failed_at, last_email,
+       protected_email_hash, mixed_targets, verification_lock_until,
+       verification_nonce, user_agent, created_at, updated_at
+     ) VALUES (?, ?, 1, 0, 0, 0, 0, NULL, NULL, ?, ?, 0, ?, ?, ?, ?, ?)
+     ON CONFLICT(ip_hash) DO UPDATE SET
+       ip_address = excluded.ip_address,
+       last_email = excluded.last_email,
+       protected_email_hash = COALESCE(auth_ip_security.protected_email_hash, excluded.protected_email_hash),
+       mixed_targets = CASE
+         WHEN auth_ip_security.protected_email_hash IS NOT NULL
+              AND auth_ip_security.protected_email_hash <> excluded.protected_email_hash THEN 1
+         ELSE auth_ip_security.mixed_targets
+       END,
+       verification_lock_until = excluded.verification_lock_until,
+       verification_nonce = excluded.verification_nonce,
+       user_agent = excluded.user_agent,
+       updated_at = excluded.updated_at
+     WHERE auth_ip_security.permanently_blocked = 0
+       AND auth_ip_security.cooldown_until <= ?
+       AND auth_ip_security.captcha_required = 0
+       AND auth_ip_security.verification_lock_until <= ?
+     RETURNING ip_hash, ip_address, stage, failures, cooldown_until, captcha_required,
+               permanently_blocked, blocked_at, last_failed_at, last_email,
+               protected_email_hash, mixed_targets, verification_lock_until,
+               verification_nonce, user_agent, created_at, updated_at`
+  ).bind(
+    hash,
+    ip,
+    email.trim().toLowerCase().slice(0, 254) || null,
+    protectedHash,
+    lockUntil,
+    nonce,
+    userAgent || null,
+    now,
+    now,
+    now,
+    now
+  ).first<IpSecurityRow>();
+
+  if (!acquired) {
+    const latest = await rowForHash(env, hash);
+    if (latest?.permanently_blocked) return { denied: blockedJson(hash) };
+    if (latest && latest.cooldown_until > now) return { denied: cooldownResponse(latest, now) };
+    if (latest?.captcha_required) {
+      return { denied: json({ error: 'Conclua a verificação anti-bot antes de tentar novamente.', code: 'CAPTCHA_REQUIRED' }, 428) };
+    }
+    return { denied: inProgressResponse() };
+  }
+
+  return {
+    reservation: {
+      ipHash: hash,
+      nonce,
+      emailHash: protectedHash,
+      mixedTargets: acquired.mixed_targets === 1,
+      protectedEmailHash: acquired.protected_email_hash
+    }
+  };
 }
 
-export async function clearPasswordFailures(request: Request, env: AppEnv): Promise<void> {
-  const hash = await clientIpHash(request);
-  await env.DB.prepare('DELETE FROM auth_ip_security WHERE ip_hash = ? AND permanently_blocked = 0').bind(hash).run();
+export async function finishPasswordVerification(
+  env: AppEnv,
+  reservation: PasswordVerificationReservation,
+  success: boolean
+): Promise<PasswordFailureResult | null> {
+  const now = Math.floor(Date.now() / 1000);
+
+  if (success) {
+    const safeToReset = !reservation.mixedTargets && reservation.protectedEmailHash === reservation.emailHash;
+    if (safeToReset) {
+      await env.DB.prepare(
+        'DELETE FROM auth_ip_security WHERE ip_hash = ? AND verification_nonce = ?'
+      ).bind(reservation.ipHash, reservation.nonce).run();
+    } else {
+      await env.DB.prepare(
+        `UPDATE auth_ip_security
+         SET verification_lock_until = 0, verification_nonce = NULL, updated_at = ?
+         WHERE ip_hash = ? AND verification_nonce = ?`
+      ).bind(now, reservation.ipHash, reservation.nonce).run();
+    }
+    return null;
+  }
+
+  const row = await env.DB.prepare(
+    `UPDATE auth_ip_security SET
+       stage = CASE
+         WHEN stage = 1 AND failures + 1 >= ? THEN 2
+         ELSE stage
+       END,
+       failures = CASE
+         WHEN stage = 1 AND failures + 1 >= ? THEN 0
+         WHEN stage = 2 AND failures + 1 >= ? THEN ?
+         ELSE failures + 1
+       END,
+       cooldown_until = CASE
+         WHEN stage = 1 AND failures + 1 >= ? THEN ?
+         ELSE cooldown_until
+       END,
+       captcha_required = CASE
+         WHEN stage = 1 AND failures + 1 >= ? THEN 1
+         ELSE captcha_required
+       END,
+       permanently_blocked = CASE
+         WHEN stage = 2 AND failures + 1 >= ? THEN 1
+         ELSE permanently_blocked
+       END,
+       blocked_at = CASE
+         WHEN stage = 2 AND failures + 1 >= ? THEN ?
+         ELSE blocked_at
+       END,
+       last_failed_at = ?,
+       verification_lock_until = 0,
+       verification_nonce = NULL,
+       updated_at = ?
+     WHERE ip_hash = ? AND verification_nonce = ?
+     RETURNING ip_hash, ip_address, stage, failures, cooldown_until, captcha_required,
+               permanently_blocked, blocked_at, last_failed_at, last_email,
+               protected_email_hash, mixed_targets, verification_lock_until,
+               verification_nonce, user_agent, created_at, updated_at`
+  ).bind(
+    FIRST_STAGE_ATTEMPTS,
+    FIRST_STAGE_ATTEMPTS,
+    SECOND_STAGE_ATTEMPTS,
+    SECOND_STAGE_ATTEMPTS,
+    FIRST_STAGE_ATTEMPTS,
+    now + COOLDOWN_SECONDS,
+    FIRST_STAGE_ATTEMPTS,
+    SECOND_STAGE_ATTEMPTS,
+    SECOND_STAGE_ATTEMPTS,
+    now,
+    now,
+    now,
+    reservation.ipHash,
+    reservation.nonce
+  ).first<IpSecurityRow>();
+
+  if (!row) {
+    // A lease should never expire during a normal PBKDF2 check. Fail closed rather
+    // than silently accepting an uncounted password guess if an isolate stalls.
+    throw new Error('Password verification lease was lost before failure accounting');
+  }
+
+  if (row.permanently_blocked) {
+    await audit(env, 'auth.ip_permanently_blocked', reservation.ipHash.slice(0, 16));
+  } else if (row.stage === 2 && row.cooldown_until > now && row.failures === 0) {
+    await audit(env, 'auth.ip_cooldown_started', reservation.ipHash.slice(0, 16));
+  }
+
+  return {
+    ...protectionState(row, env, now),
+    permanentlyBlocked: row.permanently_blocked === 1
+  };
 }
 
 function blockedJson(hash: string): Response {
@@ -328,39 +480,84 @@ export async function unblockIp(env: AppEnv, user: SessionUser, ipHash: string):
   return json({ ok: true });
 }
 
-export async function enforcePasswordReauthLimit(request: Request, env: AppEnv, user: SessionUser): Promise<Response | null> {
-  const hash = await clientIpHash(request);
+export async function beginPasswordReauthAttempt(
+  request: Request,
+  env: AppEnv,
+  user: SessionUser
+): Promise<{ denied?: Response; reservation?: ReauthReservation }> {
   const now = Math.floor(Date.now() / 1000);
-  const row = await env.DB.prepare(
-    'SELECT failures, blocked_until FROM password_reauth_limits WHERE user_id = ? AND ip_hash = ? LIMIT 1'
-  ).bind(user.id, hash).first<{ failures: number; blocked_until: number }>();
-  if (!row || row.blocked_until <= now) return null;
-  const retryAfter = row.blocked_until - now;
-  return json({ error: 'Muitas confirmações de senha incorretas. Tente novamente em 30 minutos.', code: 'REAUTH_COOLDOWN' }, 429, { 'retry-after': String(retryAfter) });
-}
+  const hash = await clientIpHash(request);
+  const nonce = crypto.randomUUID();
+  const lockUntil = now + VERIFICATION_LOCK_SECONDS;
 
-export async function recordPasswordReauthFailure(request: Request, env: AppEnv, user: SessionUser): Promise<void> {
-  const hash = await clientIpHash(request);
-  const now = Math.floor(Date.now() / 1000);
-  await env.DB.prepare(
-    `INSERT INTO password_reauth_limits (user_id, ip_hash, failures, blocked_until, updated_at)
-     VALUES (?, ?, 1, 0, ?)
+  const acquired = await env.DB.prepare(
+    `INSERT INTO password_reauth_limits (
+       user_id, ip_hash, failures, blocked_until, verification_lock_until,
+       verification_nonce, updated_at
+     ) VALUES (?, ?, 0, 0, ?, ?, ?)
      ON CONFLICT(user_id, ip_hash) DO UPDATE SET
-       failures = CASE
-         WHEN password_reauth_limits.blocked_until > ? THEN password_reauth_limits.failures
-         WHEN password_reauth_limits.failures + 1 >= ? THEN 0
-         ELSE password_reauth_limits.failures + 1
-       END,
-       blocked_until = CASE
-         WHEN password_reauth_limits.blocked_until > ? THEN password_reauth_limits.blocked_until
-         WHEN password_reauth_limits.failures + 1 >= ? THEN ?
-         ELSE 0
-       END,
-       updated_at = ?`
-  ).bind(user.id, hash, now, now, REAUTH_ATTEMPTS, now, REAUTH_ATTEMPTS, now + REAUTH_COOLDOWN_SECONDS, now).run();
+       verification_lock_until = excluded.verification_lock_until,
+       verification_nonce = excluded.verification_nonce,
+       updated_at = excluded.updated_at
+     WHERE password_reauth_limits.blocked_until <= ?
+       AND password_reauth_limits.verification_lock_until <= ?
+     RETURNING failures, blocked_until, verification_lock_until, verification_nonce`
+  ).bind(user.id, hash, lockUntil, nonce, now, now, now).first<{
+    failures: number;
+    blocked_until: number;
+    verification_lock_until: number;
+    verification_nonce: string | null;
+  }>();
+
+  if (!acquired) {
+    const row = await env.DB.prepare(
+      'SELECT blocked_until, verification_lock_until FROM password_reauth_limits WHERE user_id = ? AND ip_hash = ? LIMIT 1'
+    ).bind(user.id, hash).first<{ blocked_until: number; verification_lock_until: number }>();
+    if (row?.blocked_until && row.blocked_until > now) {
+      const retryAfter = row.blocked_until - now;
+      return { denied: json({ error: 'Muitas confirmações de senha incorretas. Tente novamente em 30 minutos.', code: 'REAUTH_COOLDOWN' }, 429, { 'retry-after': String(retryAfter) }) };
+    }
+    return { denied: json({ error: 'Outra confirmação de senha está em andamento. Aguarde um instante.', code: 'REAUTH_IN_PROGRESS' }, 429, { 'retry-after': '2' }) };
+  }
+
+  return { reservation: { userId: user.id, ipHash: hash, nonce } };
 }
 
-export async function clearPasswordReauthFailures(request: Request, env: AppEnv, user: SessionUser): Promise<void> {
-  const hash = await clientIpHash(request);
-  await env.DB.prepare('DELETE FROM password_reauth_limits WHERE user_id = ? AND ip_hash = ?').bind(user.id, hash).run();
+export async function finishPasswordReauthAttempt(
+  env: AppEnv,
+  reservation: ReauthReservation,
+  success: boolean
+): Promise<{ blocked: boolean; retryAfterSeconds: number } | null> {
+  const now = Math.floor(Date.now() / 1000);
+  if (success) {
+    await env.DB.prepare(
+      'DELETE FROM password_reauth_limits WHERE user_id = ? AND ip_hash = ? AND verification_nonce = ?'
+    ).bind(reservation.userId, reservation.ipHash, reservation.nonce).run();
+    return null;
+  }
+
+  const row = await env.DB.prepare(
+    `UPDATE password_reauth_limits SET
+       failures = CASE WHEN failures + 1 >= ? THEN 0 ELSE failures + 1 END,
+       blocked_until = CASE WHEN failures + 1 >= ? THEN ? ELSE 0 END,
+       verification_lock_until = 0,
+       verification_nonce = NULL,
+       updated_at = ?
+     WHERE user_id = ? AND ip_hash = ? AND verification_nonce = ?
+     RETURNING failures, blocked_until`
+  ).bind(
+    REAUTH_ATTEMPTS,
+    REAUTH_ATTEMPTS,
+    now + REAUTH_COOLDOWN_SECONDS,
+    now,
+    reservation.userId,
+    reservation.ipHash,
+    reservation.nonce
+  ).first<{ failures: number; blocked_until: number }>();
+
+  if (!row) throw new Error('Password reauthentication lease was lost before failure accounting');
+  return {
+    blocked: row.blocked_until > now,
+    retryAfterSeconds: Math.max(0, row.blocked_until - now)
+  };
 }
