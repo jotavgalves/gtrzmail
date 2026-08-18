@@ -1,4 +1,4 @@
-const CACHE = 'gtrz-mail-shell-v12';
+const CACHE = 'gtrz-mail-shell-v13';
 const SHELL = ['/', '/manifest.webmanifest', '/favicon.svg', '/brand/gtrz-symbol.svg', '/brand/gtrz-lockup.svg'];
 
 function isCacheableRequest(request, url) {
@@ -46,17 +46,15 @@ async function staleWhileRevalidate(request, event) {
   return cacheResponse(request, response);
 }
 
-async function navigationResponse(request, event) {
-  const cached = await caches.match(request) || await caches.match('/');
-  if (cached) {
-    event.waitUntil(revalidate(request));
-    return cached;
-  }
+async function navigationResponse(request) {
+  // Navigation is network-first so a server-side permanent IP block cannot be
+  // bypassed by an older cached shell. Offline use still falls back to the cache.
   try {
     const response = await fetch(request);
+    if (response.status === 403) return response;
     return cacheResponse(request, response);
   } catch {
-    return caches.match('/');
+    return (await caches.match(request)) || (await caches.match('/'));
   }
 }
 
@@ -79,7 +77,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (!isCacheableRequest(request, url)) return;
   if (request.mode === 'navigate') {
-    event.respondWith(navigationResponse(request, event));
+    event.respondWith(navigationResponse(request));
     return;
   }
   if (isImmutableAsset(url)) {
