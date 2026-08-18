@@ -4,7 +4,22 @@
 
 O GTRZ Mail usa Cloudflare Worker + D1 + R2, Cloudflare Email Routing para entrada e Resend para saída.
 
-As migrations devem ser aplicadas antes de publicar um Worker que dependa delas. O projeto atualmente possui migrations até `0007_key_rotation.sql`.
+O schema atual possui migrations até `0010_auth_ip_protection.sql`. **Aplique as migrations antes de publicar o Worker que depende delas.**
+
+## Pré-requisito novo: Cloudflare Turnstile
+
+Antes do deploy da proteção de login:
+
+1. No Cloudflare Dashboard, crie um widget Turnstile para `mail.gtrz.com.br` em modo Managed.
+2. Copie a site key e a secret key somente para o terminal autorizado.
+3. Configure sem colar os valores em chats, commits ou issues:
+
+```powershell
+npx wrangler secret put TURNSTILE_SITE_KEY
+npx wrangler secret put TURNSTILE_SECRET_KEY
+```
+
+O Worker valida o token no servidor. O frontend sozinho não decide se o CAPTCHA foi aceito.
 
 ## Publicar esta versão
 
@@ -15,130 +30,116 @@ cd C:\Users\CRIACAO\gtrzmail
 git pull --ff-only
 npm install
 npm run db:migrate:remote
-npm run push:setup
 npm run deploy
 ```
 
-`npm run push:setup` consulta apenas os nomes dos secrets existentes. Se `VAPID_PUBLIC_KEY` e `VAPID_PRIVATE_KEY` já existirem, não altera nada. Na primeira execução ele gera o par VAPID e envia os dois valores ao Worker sem exibi-los nem gravá-los em arquivo local. Não use `npm run push:setup -- --force` em operação normal, porque trocar o par VAPID invalida as inscrições push existentes.
+Se Web Push ainda não estiver configurado, execute uma vez `npm run push:setup`. Não use `--force` em operação normal.
 
-O `npm run deploy` já executa o build antes do Wrangler. O CI do branch valida migrations, build, typecheck e bundle do Worker.
+Depois do deploy, feche totalmente o PWA e abra novamente para assumir o shell mais recente.
 
-## Conversas agrupadas
+## Proteção de senha
 
-- mensagens recebem `thread_id` derivado de `Message-ID`, `In-Reply-To` e `References`;
-- a lista mostra apenas uma linha por thread dentro da pasta atual;
-- a linha recebe contador quando a conversa contém mais de uma mensagem;
-- mensagens antigas da conversa são buscadas sob demanda;
-- respostas enviadas e mensagens recebidas podem aparecer juntas na mesma conversa;
-- webhooks atuais do Resend alimentam `message_id` dos e-mails enviados quando o provedor disponibiliza esse campo.
+Fluxo de login por IP:
 
-## Web Push com o PWA fechado
+1. 3 senhas incorretas;
+2. bloqueio de 30 minutos;
+3. Turnstile obrigatório;
+4. mais 3 tentativas;
+5. terceira senha incorreta da segunda sequência bloqueia o IP até liberação administrativa.
 
-- o navegador usa `PushManager` + Service Worker;
-- inscrições são gravadas em D1 e associadas à conta autenticada;
-- o Worker envia Web Push após a entrada ser persistida com sucesso;
-- inscrições expiradas (`404`/`410` no push service) são removidas automaticamente;
-- o Service Worker mostra a notificação mesmo sem uma aba do GTRZ Mail aberta;
-- clicar na notificação foca uma janela existente ou abre o PWA e tenta selecionar a mensagem/thread recebida.
+A contagem fica no D1 e usa `CF-Connecting-IP`. Cookies, localStorage, modo anônimo, troca de e-mail tentado e `X-Forwarded-For` não reiniciam o contador. Uma lease atômica no D1 serializa a verificação de senha por IP para impedir rajadas paralelas de passarem várias tentativas antes da atualização do contador.
 
-## Editor HTML e leitura rica
+IPs permanentemente bloqueados não recebem a aplicação/API. O administrador, após step-up recente, vê `IPs bloqueados` em Configurações e pode liberar cada endereço.
 
-- compositor `contentEditable` com negrito, itálico, sublinhado, listas, alinhamento, links, cores e limpeza de formatação;
-- imagens PNG/JPG/GIF/WebP podem ser inseridas no corpo e são transformadas em anexos inline CID;
-- o e-mail mantém `text/plain` como fallback e HTML sanitizado;
-- texto, HTML, RFC822 e anexos ficam criptografados no R2;
-- assinatura HTML é configurável por conta;
-- a sanitização decisiva ocorre no Worker.
+### Recuperação de emergência
 
-## Agenda / contatos
+Se o próprio IP do administrador for bloqueado e não houver outro acesso ao painel:
 
-- contatos persistentes por usuário no D1;
-- nome, telefone opcional, notas e favorito;
-- vários e-mails por contato, com rótulo e endereço principal;
-- criar, editar e excluir;
-- endereços recentes do histórico continuam disponíveis;
-- autocomplete em `Para`, `Cc` e `Cco` no desktop e mobile.
+```powershell
+npm run auth:unblock-ip
+```
+
+O comando lista os IPs bloqueados. Para liberar um:
+
+```powershell
+npm run auth:unblock-ip -- 203.0.113.10
+```
+
+Também aceita o hash completo mostrado pelo D1. O comando exige Wrangler autenticado na máquina autorizada.
+
+A reautenticação por senha usada em ações sensíveis também é serializada. Três confirmações erradas bloqueiam novas confirmações por 30 minutos.
+
+## Passkeys / administração
+
+- Passkeys WebAuthn exigem verificação local do usuário.
+- Administração exige step-up recente por senha ou passkey.
+- Cadastro/remoção de passkeys exige step-up.
+- Troca de senha revoga outras sessões e gira o token atual.
+- Usuário pode listar/revogar dispositivos conectados.
+- Eventos de segurança ficam disponíveis em Configurações.
 
 ## Cache do PWA
 
-- navegações e recursos estáveis usam cache-first/stale-while-revalidate;
-- assets Vite com hash usam cache-first;
-- `/sw.js` não é servido pelo próprio cache;
-- `/api/*` nunca é interceptado pelo Service Worker;
-- mensagens, sessões, contagens, estados de entrega e anexos continuam dinâmicos.
+- `/api/*` não é cacheado pelo Service Worker.
+- assets Vite com hash continuam cache-first.
+- navegações são network-first para que um bloqueio permanente de IP seja aplicado pelo servidor mesmo quando existe shell antigo no cache; em indisponibilidade de rede continua existindo fallback offline.
+- `/sw.js` não é servido pelo próprio cache.
 
-## Alternância de contas
+## Conteúdo e anexos
 
-A alternância usa sessões independentes com cookies HttpOnly separados por conta. Senhas e tokens de sessão não são armazenados no `localStorage`.
+- HTML recebido é sanitizado no Worker.
+- imagens remotas ficam bloqueadas por padrão;
+- conteúdo HTML é isolado em iframe sandbox de origem opaca;
+- anexos ativos como HTML/SVG/XML/JS são forçados para download;
+- somente PNG/JPEG/GIF/WebP podem ser exibidos inline;
+- texto, HTML, RFC822 e anexos ficam criptografados no R2 privado.
 
-## Rotação segura da chave mestra
+## Rotação da chave mestra
 
-A instalação original usa `MASTER_KEY_B64` como slot A. O sistema agora suporta dois slots de KEK e rewrap online das DEKs:
+O sistema suporta dois slots de KEK e rewrap online das DEKs. A rotação real já foi exercitada com promoção de versão e retirada segura do slot aposentado.
 
-- slot A: `MASTER_KEY_B64`;
-- slot B: `MASTER_KEY_SLOT_B_B64`;
-- `0007_key_rotation.sql` cria o estado persistente da rotação;
-- chaves antigas sem prefixo são versão 1;
-- novos invólucros usam `vN:<ciphertext>` em `messages.encrypted_key`;
-- durante a rotação, novas mensagens passam imediatamente a usar o slot novo;
-- as DEKs existentes são reembrulhadas em lotes sem recriptografar corpo, HTML, RFC822 ou anexos;
-- cada novo invólucro é testado com AES-GCM antes de substituir o antigo;
-- a chave antiga só é removida dos Worker secrets depois que nenhuma mensagem depende dela.
-
-Primeiro publique a migration e o Worker compatível:
-
-```powershell
-npm run db:migrate:remote
-npm run deploy
-```
-
-Depois execute:
+Para uma rotação futura:
 
 ```powershell
 npm run secret:rotate-master-key
 ```
 
-O comando não imprime nem grava KEKs em arquivo e pode retomar uma rotação interrompida. Se houver falha depois do início do rewrap, **não apague manualmente** `MASTER_KEY_B64`, `MASTER_KEY_SLOT_B_B64` ou `KEY_ROTATION_TOKEN`; apenas corrija a causa e rode o comando novamente.
-
-Detalhes: `docs/KEY_ROTATION.md`.
+Se uma rotação for interrompida, não apague manualmente os slots nem `KEY_ROTATION_TOKEN`; corrija a causa e execute o comando novamente.
 
 ## DNS e entregabilidade
 
-O domínio já foi validado com SPF, DKIM e DMARC passando em mensagem real recebida pelo Gmail. A política DMARC observada está em `p=REJECT; sp=REJECT`. O domínio `gtrz.com.br` também foi verificado no Google Postmaster Tools.
+SPF, DKIM e DMARC já foram validados em mensagem real recebida pelo Gmail; a política observada é `p=REJECT; sp=REJECT`. O domínio também está verificado no Google Postmaster Tools.
 
-Para diagnóstico:
+Diagnóstico:
 
 ```powershell
 npm run dns:check
 ```
 
-Não reduza a política DMARC sem motivo operacional comprovado.
-
 ## Testes mínimos após deploy
 
-1. Login e logout.
-2. Alternar entre duas contas autenticadas.
-3. Criar assinatura formatada.
-4. Enviar HTML com imagem inline e anexo.
-5. Reabrir Enviados e confirmar HTML/anexos.
-6. Criar e reabrir rascunho.
-7. Receber e-mail HTML externo.
-8. Responder, responder a todos e encaminhar.
-9. Confirmar uma única conversa/thread quando houver respostas relacionadas.
-10. Arquivar, lixeira, restaurar e excluir permanentemente.
-11. Confirmar `sent → delivered` pelo webhook.
-12. Ativar Web Push, fechar totalmente o PWA e confirmar notificação.
-13. Clicar na notificação e confirmar abertura da mensagem correta.
-14. Criar, editar e excluir contato e testar autocomplete em `Para/Cc/Cco`.
-15. Após uma rotação de KEK, abrir mensagem antiga e baixar anexo antigo para confirmar legibilidade.
+1. Confirmar `/api/health`.
+2. Login correto e logout.
+3. Errar senha uma vez e confirmar indicação de tentativas restantes.
+4. Em IP controlado de teste, validar três falhas → cooldown de 30 min. Não faça esse teste no único IP administrativo disponível.
+5. Após o cooldown, confirmar exibição/validação do Turnstile.
+6. Validar segunda sequência em um IP de teste e confirmar página de bloqueio após a terceira falha.
+7. De outro IP administrativo, abrir Configurações → IPs bloqueados e liberar o IP de teste.
+8. Confirmar que o IP liberado volta a abrir a página.
+9. Testar `npm run auth:unblock-ip` apenas com um IP de teste quando for necessário validar a recuperação de emergência.
+10. Confirmar que duas requisições de senha paralelas para o mesmo IP não avançam simultaneamente: uma deve receber o estado de validação em andamento.
+11. Validar passkey em dispositivo real.
+12. Enviar/receber e-mail, HTML, inline image e anexo.
+13. Confirmar Web Push com o PWA totalmente fechado.
+14. Confirmar thread/reply/reply-all/forward e ações de pasta.
+15. Testar agenda/autocomplete em `Para/Cc/Cco`.
 
-## Observações de segurança
+## Controles externos ainda recomendados
 
-- O R2 permanece privado.
-- Texto, HTML, RFC822 e anexos permanecem criptografados em nível de aplicação.
-- Metadados necessários à busca, threading e roteamento ficam no D1 em texto claro.
-- A DEK de cada mensagem é protegida por envelope encryption AES-256-GCM.
-- A rotação troca apenas o invólucro da DEK; não altera o ciphertext dos conteúdos.
-- Sessões usam cookie `HttpOnly`, `Secure` e `SameSite=Strict`.
-- Senhas usam PBKDF2-HMAC-SHA256 com 100.000 iterações por limitação atual do runtime usado pelo Worker.
-- O painel administrativo só é exposto a usuários com `is_admin = 1`.
+- `Always Use HTTPS` na Cloudflare;
+- WAF Managed Rules;
+- rate limiting/Managed Challenge no edge para `/api/auth/*` e outros endpoints caros;
+- DNSSEC depois de validar o registrador;
+- MFA/passkey nas contas Cloudflare, GitHub, registrador e Google.
+
+Mesmo com o contador forte no Worker, um invasor que realmente troca de IP público passa a ter outra identidade de rede. O rate limiting/WAF no edge é a camada adequada para reduzir ataques distribuídos por muitos IPs.
