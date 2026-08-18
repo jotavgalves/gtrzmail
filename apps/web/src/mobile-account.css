@@ -1,0 +1,33 @@
+@media (max-width: 820px) {
+  .reader-toolbar .user-chip {
+    width: 42px;
+    height: 42px;
+    min-width: 42px;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    margin-left: 0;
+    padding: 3px;
+    border-radius: 11px;
+    background: #111113;
+    border: 1px solid #27272a;
+  }
+
+  .reader-toolbar .user-chip > span {
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    font-size: 10px;
+  }
+
+  .reader-toolbar .user-chip > div,
+  .reader-toolbar .user-chip > svg {
+    display: none !important;
+  }
+}
+
+@media (max-width: 380px) {
+  .reader-toolbar button[aria-label='Marcar como não lida'] {
+    display: none;
+  }
+}

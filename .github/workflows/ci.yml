@@ -1,0 +1,63 @@
+name: GTRZ Mail CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - agent/build-gtrz-mail
+  schedule:
+    - cron: '17 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, pinned
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4, pinned
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Validate D1 migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          db="$(mktemp)"
+          for migration in database/migrations/*.sql; do
+            echo "Applying $migration"
+            sqlite3 "$db" < "$migration"
+          done
+          sqlite3 "$db" "PRAGMA foreign_key_check;"
+          rm -f "$db"
+
+      - name: Build PWA
+        run: npm run build
+
+      - name: Typecheck Worker and web app
+        run: npm run typecheck
+
+      - name: Validate Worker bundle
+        run: npm run deploy:dry
+
+      # Production is intentionally tested only on scheduled/manual runs. A PR may
+      # contain protections that are not deployed yet, so production drift must not
+      # make an otherwise valid branch impossible to merge or deploy.
+      - name: Remote production security smoke
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: bash scripts/remote-security-smoke.sh

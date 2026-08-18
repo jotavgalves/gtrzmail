@@ -1,0 +1,9 @@
+body:has(.login-page) .contacts-launcher,
+body:has(.m-login) .contacts-launcher,
+body:has(.m-boot) .contacts-launcher,
+body:has(.m-compose) .contacts-launcher,
+body:has(.m-reader-screen) .contacts-launcher,
+body:has(.m-settings-screen) .contacts-launcher,
+body:has(.rich-composer) .contacts-launcher {
+  display: none;
+}

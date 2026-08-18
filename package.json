@@ -1,0 +1,48 @@
+{
+  "name": "gtrz-mail",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:web": "vite --config apps/web/vite.config.ts",
+    "build": "vite build --config apps/web/vite.config.ts",
+    "cf:typegen": "wrangler types worker-configuration.d.ts",
+    "typecheck": "npm run cf:typegen && tsc -p tsconfig.json --noEmit",
+    "dev": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "deploy:dry": "npm run build && wrangler deploy --dry-run",
+    "db:migrate:local": "wrangler d1 migrations apply gtrz-mail --local",
+    "db:migrate:remote": "wrangler d1 migrations apply gtrz-mail --remote",
+    "admin:create": "node scripts/create-admin.mjs",
+    "auth:reset-password": "node scripts/reset-password.mjs",
+    "auth:unblock-ip": "node scripts/unblock-ip.mjs",
+    "dns:check": "node scripts/check-mail-dns.mjs",
+    "push:setup": "node scripts/setup-web-push.mjs",
+    "turnstile:repair": "node scripts/repair-turnstile.mjs",
+    "secret:master-key": "node scripts/generate-master-key.mjs",
+    "secret:rotate-master-key": "node scripts/rotate-master-key.mjs"
+  },
+  "dependencies": {
+    "@simplewebauthn/browser": "13.3.0",
+    "@simplewebauthn/server": "13.3.2",
+    "lucide-react": "1.28.0",
+    "postal-mime": "2.7.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "sanitize-html": "2.17.6",
+    "web-push-neo": "0.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "@types/sanitize-html": "2.16.1",
+    "@vitejs/plugin-react": "6.0.4",
+    "typescript": "7.0.2",
+    "vite": "8.1.5",
+    "wrangler": "4.123.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

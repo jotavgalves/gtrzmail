@@ -1,0 +1,39 @@
+name: GTRZ Mail CodeQL
+
+on:
+  push:
+    branches:
+      - main
+      - agent/build-gtrz-mail
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: '43 8 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze JavaScript / TypeScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, pinned
+        with:
+          persist-credentials: false
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3, pinned 2026-08-13
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@f3712979fa5f215279b101dd0a2e3bdfb4353324 # v3, pinned 2026-08-13
+        with:
+          category: /language:javascript-typescript
