@@ -152,10 +152,13 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
     reportApiError(path, message, 0);
     throw new ApiError(message, 0);
   }
-  const payload = await response.json().catch(() => ({})) as { error?: string } & T;
+  const payload = await response.json().catch(() => ({})) as { error?: string; code?: string } & T;
   if (!response.ok) {
     const message = payload.error || 'Falha na comunicação com o GTRZ Mail.';
     reportApiError(path, message, response.status);
+    if (payload.code === 'IP_BLOCKED' && typeof window !== 'undefined') {
+      window.setTimeout(() => window.location.replace('/'), 0);
+    }
     throw new ApiError(message, response.status);
   }
   return payload;
