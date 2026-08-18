@@ -2,38 +2,61 @@
 
 ## Princípios
 
-- O frontend nunca recebe tokens de R2, D1, Resend ou a chave mestra de criptografia.
-- Sessões usam cookie `HttpOnly`, `Secure` e `SameSite=Strict`.
-- Toda operação de escrita da API exige mesma origem.
-- Corpos de e-mail e anexos são criptografados no nível da aplicação antes de irem ao R2.
-- Cada mensagem usa uma chave de dados aleatória (DEK). A DEK é protegida pela chave mestra (KEK) mantida como Worker Secret.
-- O bucket R2 deve permanecer privado.
-- E-mails HTML recebidos não são renderizados diretamente. A primeira versão exibe texto seguro derivado do MIME.
-- Webhooks do Resend são verificados por assinatura Svix e deduplicados pelo `svix-id`.
-- Logs de auditoria registram ações, nunca o corpo das mensagens.
+- O frontend nunca recebe tokens de R2, D1, Resend nem a KEK mestra.
+- Sessões usam cookie `HttpOnly`, `Secure` e `SameSite=Strict`; o D1 guarda somente SHA-256 do token.
+- Operações de escrita exigem mesma origem.
+- Corpos, HTML, RFC822 e anexos são criptografados no nível da aplicação antes do R2 privado.
+- Cada mensagem usa uma DEK aleatória AES-256-GCM protegida por uma KEK mantida como Worker Secret.
+- A KEK pode ser rotacionada por dois slots com rewrap resumível das DEKs.
+- HTML recebido é sanitizado no Worker e isolado em iframe sandbox de origem opaca na interface.
+- Imagens externas de mensagens recebidas são bloqueadas por padrão.
+- Anexos de conteúdo ativo não executam inline.
+- Webhooks do Resend são verificados por assinatura e deduplicados.
+- Logs de auditoria registram eventos, nunca corpo de e-mail, senha ou chave criptográfica.
 
-## Segredos obrigatórios
+## Autenticação
 
-Use `wrangler secret put` em produção:
+- Senha PBKDF2-HMAC-SHA256 com salt aleatório e comparação em tempo constante.
+- Passkeys/WebAuthn com verificação local do usuário obrigatória.
+- Desafios WebAuthn são curtos e de uso único.
+- Administração exige step-up recente por senha ou passkey.
+- Sessões têm expiração absoluta, timeout de inatividade, vínculo com User-Agent e podem ser listadas/revogadas.
+- Trocar a senha encerra outras sessões e gira o token atual.
 
-- `MASTER_KEY_B64`: 32 bytes aleatórios em Base64.
-- `RESEND_API_KEY`: chave da API do Resend.
-- `RESEND_WEBHOOK_SECRET`: segredo `whsec_...` do webhook.
+## Proteção contra tentativa de senha
 
-Gere a chave mestra, por exemplo, com Node:
+A contagem de login é mantida no D1 e identificada pelo `CF-Connecting-IP` fornecido pela Cloudflare.
 
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
-```
+- primeiras 3 senhas incorretas → bloqueio de 30 minutos;
+- após 30 minutos → Cloudflare Turnstile obrigatório;
+- mais 3 senhas incorretas → bloqueio permanente daquele IP até o administrador liberar;
+- o IP bloqueado não recebe a página nem as APIs normais;
+- existe painel administrativo de IPs bloqueados e recuperação via `npm run auth:unblock-ip`;
+- uma lease atômica no D1 serializa PBKDF2 por IP, impedindo bypass com várias requisições simultâneas;
+- limpar cookies/localStorage, modo anônimo, trocar e-mail tentado ou falsificar `X-Forwarded-For` não reinicia o contador;
+- a confirmação de identidade por senha também recebe limite de 3 erros e cooldown de 30 minutos.
+
+A troca real do endereço IP público continua sendo uma nova identidade de rede. WAF/rate limiting no edge é a camada complementar para ataques distribuídos por múltiplos IPs.
+
+## Segredos de produção
+
+Configure com `wrangler secret put` e nunca publique os valores:
+
+- `MASTER_KEY_B64` ou o slot de KEK atualmente ativo;
+- `RESEND_API_KEY`;
+- `RESEND_WEBHOOK_SECRET`;
+- `VAPID_PUBLIC_KEY` e `VAPID_PRIVATE_KEY`;
+- `TURNSTILE_SITE_KEY` e `TURNSTILE_SECRET_KEY`;
+- `KEY_ROTATION_TOKEN` somente enquanto uma rotação de KEK estiver em andamento.
 
 Nunca comite `.dev.vars`, `.env` ou qualquer segredo.
 
-## Cabeçalhos
+## Cabeçalhos e browser isolation
 
-O Worker adiciona CSP, HSTS, `nosniff`, política de referrer e política de permissões a respostas do aplicativo.
+O Worker e os Static Assets aplicam CSP, HSTS, `nosniff`, `frame-ancestors 'none'`, Referrer-Policy, Permissions-Policy, COOP/CORP e demais restrições. A CSP libera `challenges.cloudflare.com` exclusivamente para o script/frame do Turnstile.
 
-## Limitações atuais
+## Limitações
 
-- A criptografia no R2 é forte, mas não é E2EE/zero-knowledge: o Worker precisa descriptografar a mensagem para exibi-la.
-- Metadados de indexação (remetente, destinatários, assunto e preview) ficam no D1 para busca e listagem.
-- Passkeys/WebAuthn são uma evolução prevista; a autenticação inicial usa senha PBKDF2-HMAC-SHA256 e sessão opaca.
+- A criptografia no R2 não é E2EE/zero-knowledge: o Worker possui autoridade para desembrulhar a DEK e exibir a mensagem ao usuário autenticado.
+- Metadados necessários a busca, threading, roteamento e segurança ficam no D1 em texto claro; isso inclui remetente/destinatários/assunto/preview e, no módulo de bloqueio administrativo, o endereço IP que foi bloqueado.
+- Proteção puramente por IP não identifica uma pessoa que muda de rede, VPN ou proxy. Por isso o desenho também depende de Turnstile, passkeys, rate limiting do Worker e controles de edge da Cloudflare.
