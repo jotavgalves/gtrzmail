@@ -38,6 +38,17 @@
     "SESSION_DAYS": "7",
     "MAX_OUTBOUND_ATTACHMENT_BYTES": "18874368"
   },
+  "secrets": {
+    "required": [
+      "MASTER_KEY_B64",
+      "RESEND_API_KEY",
+      "RESEND_WEBHOOK_SECRET",
+      "VAPID_PUBLIC_KEY",
+      "VAPID_PRIVATE_KEY",
+      "TURNSTILE_SITE_KEY",
+      "TURNSTILE_SECRET_KEY"
+    ]
+  },
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1
