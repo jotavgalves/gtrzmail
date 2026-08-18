@@ -119,10 +119,21 @@ export default function LoginProtectionEnhancer() {
         throw new ApiError('Conclua a verificação anti-bot antes de tentar novamente.', 428);
       }
       setLoading(true);
+      const tokenUsed = suppliedToken || currentTurnstileToken || undefined;
       try {
-        const result = await originalLogin(email, password, suppliedToken || currentTurnstileToken || undefined);
+        const result = await originalLogin(email, password, tokenUsed);
         currentTurnstileToken = '';
         return result;
+      } catch (cause) {
+        // Turnstile tokens are single-use. Never reuse a token after a request
+        // reached the server, even when the password itself was wrong.
+        if (tokenUsed) {
+          currentTurnstileToken = '';
+          if (window.turnstile) {
+            try { window.turnstile.reset(widgetIdRef.current || undefined); } catch { /* noop */ }
+          }
+        }
+        throw cause;
       } finally {
         setLoading(false);
         window.setTimeout(() => void refresh(), 80);
