@@ -6,6 +6,8 @@ export type SecretBindings = {
   RESEND_WEBHOOK_SECRET: string;
   VAPID_PUBLIC_KEY: string;
   VAPID_PRIVATE_KEY: string;
+  TURNSTILE_SITE_KEY?: string;
+  TURNSTILE_SECRET_KEY?: string;
 };
 
 export type AppEnv = Env & SecretBindings;
