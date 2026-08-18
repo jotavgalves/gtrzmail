@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, LoaderCircle, RefreshCw, ShieldCheck } from 'lucide-react';
 import { mailApi, type SecurityEvent } from './api';
+import BlockedIpsPanel from './BlockedIpsPanel';
 
 const labels: Record<string, string> = {
   'auth.login': 'Login com senha',
@@ -17,6 +18,10 @@ const labels: Record<string, string> = {
   'auth.step_up_password_succeeded': 'Identidade confirmada por senha',
   'auth.step_up_password_failed': 'Falha na confirmação por senha',
   'auth.step_up_passkey_succeeded': 'Identidade confirmada por passkey',
+  'auth.turnstile_passed': 'Turnstile concluído',
+  'auth.ip_cooldown_started': 'IP bloqueado temporariamente por senha incorreta',
+  'auth.ip_permanently_blocked': 'IP bloqueado permanentemente',
+  'admin.ip_unblocked': 'IP desbloqueado pelo administrador',
   'admin.account_created': 'Conta criada pelo administrador',
   'admin.account_enabled': 'Conta ativada',
   'admin.account_disabled': 'Conta desativada',
@@ -28,7 +33,11 @@ const labels: Record<string, string> = {
 };
 
 function suspicious(action: string): boolean {
-  return action.includes('failed') || action.includes('mismatch') || action.includes('network_changed') || action === 'mail.rate_limited';
+  return action.includes('failed') ||
+    action.includes('mismatch') ||
+    action.includes('network_changed') ||
+    action.includes('permanently_blocked') ||
+    action === 'mail.rate_limited';
 }
 
 function when(timestamp: number): string {
@@ -57,20 +66,23 @@ export default function SecurityEventsPanel() {
 
   useEffect(() => { void load(); }, []);
 
-  return <section className="settings-section security-events-panel">
-    <div className="security-events-title">
-      <h3><ShieldCheck size={15} /> Atividade de segurança</h3>
-      <button className="icon-button" type="button" onClick={() => void load()} disabled={loading} aria-label="Atualizar atividade de segurança"><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>
-    </div>
-    <p className="settings-hint">Logins, passkeys, mudanças de sessão, bloqueios de envio e ações administrativas recentes. Se você não reconhecer um evento, troque a senha e encerre as outras sessões.</p>
-    {loading && events.length === 0 ? <div className="settings-loading"><LoaderCircle size={18} className="spin" /> Carregando atividade</div> : null}
-    {!loading && events.length === 0 ? <div className="settings-hint">Nenhum evento de segurança registrado ainda.</div> : null}
-    <div className="security-event-list">
-      {events.slice(0, 20).map((event) => <article className={`security-event ${suspicious(event.action) ? 'warning' : ''}`} key={event.id}>
-        <div>{suspicious(event.action) ? <AlertTriangle size={15} /> : <ShieldCheck size={15} />}</div>
-        <div><strong>{labels[event.action] || event.action}</strong><span>{when(event.createdAt)}</span></div>
-      </article>)}
-    </div>
-    {error && <div className="form-error settings-error">{error}</div>}
-  </section>;
+  return <>
+    <section className="settings-section security-events-panel">
+      <div className="security-events-title">
+        <h3><ShieldCheck size={15} /> Atividade de segurança</h3>
+        <button className="icon-button" type="button" onClick={() => void load()} disabled={loading} aria-label="Atualizar atividade de segurança"><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>
+      </div>
+      <p className="settings-hint">Logins, passkeys, mudanças de sessão, bloqueios de IP, bloqueios de envio e ações administrativas recentes. Se você não reconhecer um evento, troque a senha e encerre as outras sessões.</p>
+      {loading && events.length === 0 ? <div className="settings-loading"><LoaderCircle size={18} className="spin" /> Carregando atividade</div> : null}
+      {!loading && events.length === 0 ? <div className="settings-hint">Nenhum evento de segurança registrado ainda.</div> : null}
+      <div className="security-event-list">
+        {events.slice(0, 20).map((event) => <article className={`security-event ${suspicious(event.action) ? 'warning' : ''}`} key={event.id}>
+          <div>{suspicious(event.action) ? <AlertTriangle size={15} /> : <ShieldCheck size={15} />}</div>
+          <div><strong>{labels[event.action] || event.action}</strong><span>{when(event.createdAt)}</span></div>
+        </article>)}
+      </div>
+      {error && <div className="form-error settings-error">{error}</div>}
+    </section>
+    <BlockedIpsPanel />
+  </>;
 }
