@@ -74,6 +74,29 @@ import {
 } from './thread-mail';
 import { threadMessageIds } from './threads';
 
+function processSecret(name: string): string | undefined {
+  try {
+    const value = Reflect.get(process.env, name);
+    return typeof value === 'string' && value.length > 0 ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function withRuntimeSecretFallbacks(env: AppEnv): AppEnv {
+  const siteKey = env.TURNSTILE_SITE_KEY || processSecret('TURNSTILE_SITE_KEY');
+  const secretKey = env.TURNSTILE_SECRET_KEY || processSecret('TURNSTILE_SECRET_KEY');
+  if (!siteKey && !secretKey) return env;
+
+  return new Proxy(env, {
+    get(target, property, receiver) {
+      if (property === 'TURNSTILE_SITE_KEY' && siteKey) return siteKey;
+      if (property === 'TURNSTILE_SECRET_KEY' && secretKey) return secretKey;
+      return Reflect.get(target, property, receiver);
+    }
+  });
+}
+
 async function api(request: Request, env: AppEnv): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname.length > 1 ? url.pathname.replace(/\/+$/, '') : url.pathname;
@@ -205,11 +228,12 @@ async function api(request: Request, env: AppEnv): Promise<Response> {
 export default {
   async fetch(request, env): Promise<Response> {
     try {
-      const blocked = await ipAccessGate(request, env);
+      const runtimeEnv = withRuntimeSecretFallbacks(env);
+      const blocked = await ipAccessGate(request, runtimeEnv);
       if (blocked) return withSecurityHeaders(blocked);
 
       const url = new URL(request.url);
-      const response = url.pathname.startsWith('/api/') ? await api(request, env) : await env.ASSETS.fetch(request);
+      const response = url.pathname.startsWith('/api/') ? await api(request, runtimeEnv) : await runtimeEnv.ASSETS.fetch(request);
       return withSecurityHeaders(response);
     } catch (error) {
       console.error(JSON.stringify({ level: 'error', event: 'request.failed', message: error instanceof Error ? error.message : 'Unknown error' }));
