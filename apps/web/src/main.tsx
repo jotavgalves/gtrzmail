@@ -1,6 +1,7 @@
 import { StrictMode, Suspense, lazy, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import LoginProtectionEnhancer from './LoginProtectionEnhancer';
 import MailSandboxEnhancer from './MailSandboxEnhancer';
 import PasskeyLoginEnhancer from './PasskeyLoginEnhancer';
 import { installPerformanceTuning } from './performance';
@@ -18,6 +19,7 @@ import './contacts.css';
 import './contacts-visibility.css';
 import './mail-sandbox.css';
 import './security.css';
+import './login-protection.css';
 
 const MobileApp = lazy(() => import('./MobileApp'));
 const MobileUXFixes = lazy(() => import('./MobileUXFixes'));
@@ -85,6 +87,7 @@ function RootApp() {
         <ContactsIntegration />
       </Suspense>
       <PasskeyLoginEnhancer />
+      <LoginProtectionEnhancer />
       <MailSandboxEnhancer />
     </>;
   }
@@ -94,6 +97,7 @@ function RootApp() {
     <Suspense fallback={null}><ContactsIntegration /></Suspense>
     <DeferredEnhancers />
     <PasskeyLoginEnhancer />
+    <LoginProtectionEnhancer />
     <MailSandboxEnhancer />
   </>;
 }
