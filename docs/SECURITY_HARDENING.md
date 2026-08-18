@@ -4,16 +4,16 @@ Este documento descreve a defesa em profundidade do GTRZ Mail. Não contém secr
 
 ## Perímetro
 
-- HTTPS obrigatório no edge da Cloudflare (ativar `Always Use HTTPS` na zona).
-- TLS 1.0/1.1 recusados; smoke remoto valida TLS 1.2+.
+- HTTPS obrigatório no edge da Cloudflare.
+- TLS legado é verificado pelo smoke remoto; TLS 1.2+ precisa permanecer disponível.
 - HSTS, CSP, `nosniff`, `frame-ancestors 'none'`, COOP/CORP, Referrer-Policy e Permissions-Policy tanto no Worker quanto nos Static Assets.
 - APIs sempre `Cache-Control: no-store` e sem CORS wildcard.
 - Mutações exigem `Origin` exatamente igual a `APP_ORIGIN`.
-- Smoke remoto diário e manual valida o ambiente público sem credenciais.
+- O shell PWA usa navegação network-first para que um IP permanentemente bloqueado não consiga reaproveitar uma página antiga do cache para contornar a tela de bloqueio.
 
 ## Autenticação e sessões
 
-- Senhas PBKDF2-HMAC-SHA256 com salt aleatório; runtime atual limita o custo a 100.000 iterações.
+- Senhas PBKDF2-HMAC-SHA256 com salt aleatório; runtime atual usa até 100.000 iterações.
 - Sessão é um token opaco de 256 bits; somente SHA-256(token) fica no D1.
 - Cookies `HttpOnly`, `Secure`, `SameSite=Strict`.
 - Limite absoluto de sessão + 12 horas de inatividade.
@@ -21,8 +21,32 @@ Este documento descreve a defesa em profundidade do GTRZ Mail. Não contém secr
 - Mudanças de rede/IP são auditadas sem bloquear redes móveis legítimas.
 - Troca de senha revoga todas as outras sessões e gira o token atual.
 - Usuário consegue listar e revogar dispositivos/sessões.
-- Brute force limitado simultaneamente por e-mail+IP, por e-mail e por IP.
-- E-mails inexistentes executam trabalho PBKDF2 de compensação para reduzir enumeração por tempo.
+- E-mails inexistentes executam o mesmo trabalho PBKDF2 para reduzir enumeração por tempo.
+
+### Tentativas de senha e bloqueio por IP
+
+A migration `0010_auth_ip_protection.sql` mantém o estado no D1; o navegador não é a fonte da contagem.
+
+1. O IP recebe até **3 senhas incorretas**.
+2. A terceira senha incorreta inicia bloqueio temporário de **30 minutos**.
+3. Encerrado o prazo, um **Cloudflare Turnstile** válido é obrigatório antes da segunda sequência.
+4. Depois do Turnstile, o IP recebe mais **3 tentativas**.
+5. A terceira senha incorreta da segunda sequência torna o IP **bloqueado até intervenção administrativa**.
+6. Um IP permanentemente bloqueado recebe `403` nas APIs e uma página de bloqueio nas navegações.
+7. O administrador pode liberar o IP pelo painel de segurança; existe também `npm run auth:unblock-ip` como recuperação de emergência fora do navegador.
+
+Defesas contra manipulação da contagem:
+
+- a chave principal é `CF-Connecting-IP`, inserida pela Cloudflare; `X-Forwarded-For`, cookies, localStorage, query string e e-mail digitado não controlam o identificador do IP;
+- a contagem fica no D1, portanto limpar dados do navegador, trocar navegador ou abrir modo anônimo não reinicia o estado;
+- trocar o endereço de e-mail tentado não reinicia o contador do IP; o estado registra quando houve alvos diferentes para impedir que um login válido em outra conta seja usado como atalho para apagar falhas anteriores;
+- antes de executar PBKDF2, o Worker adquire uma lease curta e atômica no D1; apenas uma verificação de senha por IP pode avançar de cada vez, impedindo rajadas paralelas de passarem várias senhas antes da persistência da terceira falha;
+- se o Worker cair durante a verificação, a lease expira sozinha; uma tentativa não fica travada indefinidamente;
+- o Turnstile é validado no servidor, com `remoteip`, hostname e `action` esperados; o token não é aceito apenas porque o frontend diz que o CAPTCHA passou;
+- o frontend descarta o token do Turnstile depois do uso e não tenta reutilizá-lo;
+- a mesma serialização é aplicada ao step-up por senha; três confirmações incorretas bloqueiam novas confirmações por 30 minutos.
+
+Um invasor que realmente muda de endereço IP público cria uma nova identidade de rede; nenhum contador puramente por IP consegue provar que é a mesma origem. Por isso o próximo nível de proteção fica no edge: rate limiting/WAF/Managed Challenge para `/api/auth/*`, além de Turnstile e monitoramento de eventos.
 
 ## Passkeys / WebAuthn
 
@@ -58,7 +82,9 @@ Este documento descreve a defesa em profundidade do GTRZ Mail. Não contém secr
 - Rotas administrativas verificam `is_admin` no Worker.
 - Listagem e mutações administrativas exigem step-up recente.
 - Alteração de senha administrativa derruba sessões da conta afetada.
-- Eventos `auth.*`, `admin.*` e `crypto.*` são mantidos em audit log e expostos apenas à conta autenticada; visão global exige admin + step-up.
+- Eventos `auth.*`, `admin.*`, `crypto.*` e bloqueios de abuso são mantidos em audit log.
+- O painel `IPs bloqueados` é visível somente após autenticação administrativa + step-up recente.
+- A liberação de IP pelo endpoint administrativo também exige essas duas condições no Worker; ocultar o botão no frontend não é o controle de segurança.
 
 ## Supply chain
 
@@ -68,6 +94,17 @@ Este documento descreve a defesa em profundidade do GTRZ Mail. Não contém secr
 - `npm audit --omit=dev --audit-level=high` bloqueia vulnerabilidades altas/críticas de produção.
 - Dependabot acompanha npm e GitHub Actions semanalmente.
 - CodeQL `security-extended` analisa JavaScript/TypeScript automaticamente.
+
+## Turnstile
+
+O frontend usa renderização explícita do widget somente quando o primeiro lote de três falhas já terminou e o cooldown expirou. A validação decisiva acontece no Worker.
+
+Bindings necessários em produção:
+
+- `TURNSTILE_SITE_KEY`
+- `TURNSTILE_SECRET_KEY`
+
+Esses valores não devem ser enviados para issues, commits ou conversas. Configure-os diretamente com Wrangler depois de criar o widget para `mail.gtrz.com.br` no painel Cloudflare.
 
 ## Testes remotos
 
@@ -82,21 +119,21 @@ Este documento descreve a defesa em profundidade do GTRZ Mail. Não contém secr
 - TRACE recusado;
 - TLS legado desabilitado.
 
-## Controles que ficam no painel Cloudflare
+Os testes automatizados não provocam seis senhas erradas em produção, pois isso bloquearia o IP do runner. O fluxo destrutivo de bloqueio deve ser validado de forma controlada com um IP de teste que possa ser liberado imediatamente pelo painel ou pelo comando de emergência.
 
-Estes itens não podem ser efetivados apenas pelo repositório:
+## Controles que ficam no painel Cloudflare
 
 1. `Always Use HTTPS` na zona.
 2. WAF Managed Rules compatíveis com o plano.
 3. Rate limiting no edge para `/api/auth/*`, `/api/messages/send` e endpoints caros.
-4. Managed Challenge/Turnstile para tráfego de login considerado abusivo.
-5. Cloudflare Access ou service token para um hostname administrativo/interno, se adotado.
+4. Managed Challenge adicional para tráfego anômalo, se desejado.
+5. Cloudflare Access ou service token para uma superfície administrativa separada, se adotado.
 6. DNSSEC na zona, depois de validar o registrador.
 
 ## Operação
 
 - Nunca armazenar secrets em commits, issues, Actions logs ou chats.
 - Usar tokens Cloudflare com menor privilégio possível; evitar Global API Key.
-- Cloudflare, GitHub, registrador e Conta Google devem usar MFA resistente a phishing (passkey/chave FIDO2 quando disponível).
-- Revisar eventos de segurança e sessões ativas periodicamente.
+- Cloudflare, GitHub, registrador e Conta Google devem usar MFA resistente a phishing.
+- Revisar eventos de segurança, IPs bloqueados e sessões ativas periodicamente.
 - Fazer restore testado de D1/R2 e manter recuperação da KEK fora da mesma conta/host da produção.
