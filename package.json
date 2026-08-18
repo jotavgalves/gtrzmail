@@ -18,6 +18,7 @@
     "auth:unblock-ip": "node scripts/unblock-ip.mjs",
     "dns:check": "node scripts/check-mail-dns.mjs",
     "push:setup": "node scripts/setup-web-push.mjs",
+    "turnstile:repair": "node scripts/repair-turnstile.mjs",
     "secret:master-key": "node scripts/generate-master-key.mjs",
     "secret:rotate-master-key": "node scripts/rotate-master-key.mjs"
   },
