@@ -11,6 +11,10 @@ CREATE TABLE IF NOT EXISTS auth_ip_security (
   blocked_at INTEGER,
   last_failed_at INTEGER,
   last_email TEXT,
+  protected_email_hash TEXT,
+  mixed_targets INTEGER NOT NULL DEFAULT 0 CHECK (mixed_targets IN (0, 1)),
+  verification_lock_until INTEGER NOT NULL DEFAULT 0,
+  verification_nonce TEXT,
   user_agent TEXT,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
@@ -27,6 +31,8 @@ CREATE TABLE IF NOT EXISTS password_reauth_limits (
   ip_hash TEXT NOT NULL,
   failures INTEGER NOT NULL DEFAULT 0 CHECK (failures >= 0),
   blocked_until INTEGER NOT NULL DEFAULT 0,
+  verification_lock_until INTEGER NOT NULL DEFAULT 0,
+  verification_nonce TEXT,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY (user_id, ip_hash)
 );
